@@ -1,0 +1,12 @@
+#!/bin/sh
+
+set -e
+
+# apk add --no-cache make gcc musl-dev indent
+
+find "$(readlink -f "$(dirname "$0")")" \
+	\( -name '*.c' -o -name '*.h' \) -print |
+	while read -r file; do
+	indent -linux -l120 -i4 -nut "$file" -o "${file}.new"
+	mv "${file}.new" "$file"
+done
