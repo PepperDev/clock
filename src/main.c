@@ -50,7 +50,7 @@ int main(int argc, char *argv[])
                 if (size < 1) {
                     size = 1;
                 }
-                row = wsrow > 3 ? (wsrow - (size * 5 + 1) / 2) / 2 : 0;
+                row = wsrow > 3 ? (wsrow - size * 5 / 2) / 2 : 0;
                 col = wscol > 27 ? (wscol - size * 27) / 2 : 0;
             }
             printf("\033[?25l\033[%u;0H", row);
@@ -98,9 +98,8 @@ void print_time(unsigned short col, int hour, int min, int sec, int size)
         }
         for (int j = 0; j < 27; j++) {
             char *save = pos;
-            int uline = i * 2 / size;
             int lline = (i * 2 + 1) / size;
-            char upper = dots[j][uline];
+            char upper = dots[j][i * 2 / size];
             char lower = lline < 5 ? dots[j][lline] : 0;
             if (lower && upper) {
                 *(pos++) = '\xe2';
@@ -125,8 +124,11 @@ void print_time(unsigned short col, int hour, int min, int sec, int size)
         }
         *(pos++) = '\n';
         *pos = 0;
-        // hsize = ((i * 2 / size + 1) * size) / 2 - ((i * 2 / size) * size) / 2;
-        // printf("hsize: %d\r", hsize);
+        if (i * 2 / size != (i * 2 + 3) / size) {
+            hsize = 1;
+        } else {
+            hsize = (((i * 2) / size + 1) * size) / 2 - i;
+        }
         for (int n = hsize; n--;) {
             printf(buf);
         }
