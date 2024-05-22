@@ -8,7 +8,10 @@ SOURCES = $(patsubst %,src/%.c, \
 OBJS    = $(SOURCES:src/%.c=.objs/%.o)
 DIRS    = $(patsubst %/,%,$(sort $(dir $(TARGET) $(OBJS))))
 
-CFLAGS  = -std=c99 -pedantic -O3 -Wall
+CFLAGS  = -std=c99 -pedantic -O3 -Wall -Wextra -Wpedantic -Wformat=2 \
+			-Wno-unused-parameter -Wshadow -Wwrite-strings -Wstrict-prototypes \
+			-Wold-style-definition -Wredundant-decls -Wnested-externs \
+			-Wmissing-include-dirs
 LDFLAGS = -static
 LIBS    =
 
@@ -22,6 +25,7 @@ $(TARGET): $(OBJS) | bin
 .objs/%.o: src/%.c | .objs
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# (CC) -M -MP -MT '$(<:src/%.c=.objs/%.o) $@' $(CFLAGS) $< > $@
 # .objs/main.o: src/main.h
 
 $(DIRS):

@@ -16,12 +16,23 @@ void print_time(unsigned short, int, int, int, int);
 
 void fill_dots(char (*)[27][5], int, int);
 
+static struct termios *original_mode = NULL;
+
 int main(int argc, char *argv[])
 {
     int place = isatty(STDOUT_FILENO);
     unsigned short wsrow = 0, wscol = 0, row = 0, col = 0;
     int size = 1;
     if (place) {
+        if (isatty(STDIN_FILENO)) {
+            static struct termios mode;
+            tcgetattr(STDIN_FILENO, &mode);
+            tcflag_t original_c_lflag = mode.c_lflag;
+            mode.c_lflag ^= ECHO;
+            tcsetattr(STDIN_FILENO, TCSADRAIN, &mode);
+            mode.c_lflag = original_c_lflag;
+            original_mode = &mode;
+        }
         atexit(show_cursor);
         struct sigaction sa = {
             .sa_handler = signal_handler,
@@ -66,6 +77,9 @@ int main(int argc, char *argv[])
 void show_cursor(void)
 {
     printf("\033[?25h");
+    if (original_mode) {
+        tcsetattr(STDIN_FILENO, TCSADRAIN, original_mode);
+    }
     fflush(stdout);
 }
 
@@ -122,7 +136,6 @@ void print_time(unsigned short col, int hour, int min, int sec, int size)
                 pos += len;
             }
         }
-        *(pos++) = '\n';
         *pos = 0;
         if (i * 2 / size != (i * 2 + 3) / size) {
             hsize = 1;
@@ -130,7 +143,7 @@ void print_time(unsigned short col, int hour, int min, int sec, int size)
             hsize = (((i * 2) / size + 1) * size) / 2 - i;
         }
         for (int n = hsize; n--;) {
-            printf(buf);
+            puts(buf);
         }
     }
 }
