@@ -1,2 +1,5 @@
-/bin/clock
-/.objs
+bin/
+obj/
+*.tar.xz
+*.deb
+*.rpm

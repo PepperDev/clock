@@ -1,0 +1,79 @@
+#!/bin/sh
+set -e
+
+echo "=== Install dependencies ==="
+apk add --no-cache -q gcc make musl-dev linux-headers indent cppcheck py3-pip git
+pip install --break-system-packages lizard --quiet
+
+echo "=== Setup non-root user ==="
+uid=$(shuf -i2000-9999 -n1)
+install -o "$uid" -g "$uid" -m 755 -d /tmp/w
+install -o "$uid" -g "$uid" -m 644 /dev/null "$GITHUB_STEP_SUMMARY"
+
+echo "=== Build ==="
+HOME=/tmp/w nsenter "--setuid=$uid" "--setgid=$uid" "--wd=/tmp/w" sh -es <<'BUILD'
+echo "=== Checkout ==="
+git init -q
+git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+git fetch -q origin "${GITHUB_SHA}"
+git checkout -qf "${GITHUB_SHA}"
+
+echo "=== Format check ==="
+make format
+git diff --exit-code
+
+echo "=== Lint ==="
+make lint
+
+echo "=== Build ==="
+make -j4
+
+echo "=== Lizard summary ==="
+{
+  echo '## Code Metrics (lizard)'
+  echo ''
+  echo '| Module | NLOC | AvgCCN | AvgToken | Functions |'
+  echo '|--------|-----:|-------:|---------:|----------:|'
+  make --no-print-directory LIZARD_FLAGS= lizard 2>/dev/null \
+    | awk '/^NLOC[[:space:]]+Avg\.NLOC/ { s=1; next }
+           /^Total/ { s=0 }
+           /^=+$/ { if(s) s=0 }
+           s && NF >= 5 { gsub(/^src\//,"",$NF); printf("| %s | %s | %s | %s | %d |\n",$NF,$1,$3,$4,$5) }'
+} >> "$GITHUB_STEP_SUMMARY"
+
+echo "=== Test & Coverage ==="
+make coverage 2>&1
+
+echo "=== Coverage summary ==="
+{
+  echo '## Code Coverage'
+  echo ''
+  echo '| Module | Lines | Coverage |'
+  echo '|--------|------:|---------:|'
+  find obj/cov -name '*.gcda' ! -name '*syscall.gcda' 2>/dev/null | while IFS= read -r g; do
+    base=${g%.gcda}
+    src=$(echo "$base" | sed 's|obj/cov/|src/|').c
+    gcov -o "$base" -s . "src/${src#src/}" 2>/dev/null
+  done | awk -v sq="'" '
+    /^File / {
+      n = split($0, a, sq)
+      module = a[2]
+      sub(/^src\//, "", module)
+      sub(/\.c$/, "", module)
+    }
+    /^Lines executed:/ {
+      if (seen[module]++) next
+      split($0, a, ":")
+      rest = a[2]
+      split(rest, b, "%")
+      split(b[2], c, "of")
+      printf("%f|%d|%s\n", b[1] + 0, c[2] + 0, module)
+    }
+  ' | sort -t'|' -k1 -rn | awk -F'|' '
+    {
+      printf("| %s | %d | %.2f%% |\n", $3, $2, $1)
+    }
+  '
+} >> "$GITHUB_STEP_SUMMARY"
+
+BUILD

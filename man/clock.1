@@ -1,0 +1,114 @@
+.TH CLOCK 1 "2026-06-13" "clock" "Terminal Clock"
+.SH NAME
+clock \- terminal dashboard: clock and machine monitor
+.SH SYNOPSIS
+.B clock
+[\fB--help\fR] [\fB--once\fR] [\fB--all\fR] [\fB--gpu\fR] [\fB--fan\fR] [\fB--sunday-start\fR] [\fB--widgets\fR \fIlist\fR] [\fB--ip-refresh\fR [\fIn\fR]] [\fB--weather-refresh\fR [\fIn\fR]] [\fBauto\fR|\fBtext\fR|\fBascii\fR|\fBsixel\fR]
+.SH DESCRIPTION
+.B clock
+displays a real-time dashboard: a large digital clock centered on the
+terminal and a right-side information bar showing system metrics.
+.B clock
+gathers all data from /proc, /sys, and netlink (rtnetlink + nl80211) without invoking external binaries.
+Public IPv4/IPv6 addresses are fetched periodically from api.ipify.org
+over HTTP. Weather data is fetched from wttr.in over HTTP.
+.SH OPTIONS
+.TP
+.B auto
+Auto-detect the best display mode (default). If stdout is a terminal
+with sixel support, sixel mode is used. If stdout is a terminal without
+sixel, ascii mode is used. Otherwise, text mode is used.
+.TP
+.B text
+Plain text output, one metric per line. Suitable for piping to files or
+other programs.
+.TP
+.B ascii
+Large digital clock using Unicode block characters plus a right-side
+info bar with Unicode icons for wireless, weather, battery, etc.
+.TP
+.B sixel
+Sixel graphics clock digits (bitmapped from dot-matrix patterns) with
+regular terminal text info bar. No sixel icons.
+.TP
+.B \-\-help, \-h
+Print usage summary to stdout and exit 0.
+.TP
+.B \-\-once, \-o
+Print output once and exit. No 1-second loop.
+.TP
+.B \-\-all, \-a
+Enable \fB--gpu\fR and \fB--fan\fR together. Only effective when
+\fB--widgets\fR is not given.
+.TP
+.B \-\-gpu, \-g
+Enable GPU monitoring: usage, core/memory clock, memory usage,
+temperature, fan. Only effective when \fB--widgets\fR is not given.
+.TP
+.B \-\-fan, \-f
+Enable motherboard fan speeds and motherboard temperatures (merged,
+no separate --temp flag). Only effective when \fB--widgets\fR is not
+given.
+.TP
+.B \-\-sunday\-start, \-S
+Calendar week starts on Sunday instead of Monday.
+.TP
+.B \-\-widgets \fIlist\fR, \-w
+Comma-separated list of widget names controlling sidebar content and
+order. Overrides \fB--gpu\fR, \fB--fan\fR, and \fB--all\fR. Empty
+string disables sidebar entirely (full-screen clock). Valid widget
+names: DATE, CPU, GPU, MEM, FAN, BAT, UP, STO, NET, WEATHER, CAL.
+.TP
+.B \-\-ip\-refresh [\fIn\fR], \-I
+Set public IP refresh interval in seconds. Default: 86400 (24 hours).
+If no argument is given, the default interval is used.
+.TP
+.B \-\-weather\-refresh [\fIn\fR], \-W
+Set weather refresh interval in seconds. Default: 1800 (30 minutes).
+If no argument is given, the default interval is used.
+.SH WIDGETS
+The sidebar is built from named widget sections. The default order
+(when \fB--widgets\fR is not given) is:
+.PP
+DATE, CPU, GPU, MEM, FAN, BAT, UP, STO, NET, WEATHER, CAL
+.PP
+With \fB--widgets\fR, only the listed widgets appear, in the given
+order. Data sources are only read for active widgets (lazy reads).
+.SH DISPLAY SECTIONS
+Clock (center-left or full-width when sidebar is empty), date,
+CPU usage/load/freq/governor/temperature, GPU stats, memory usage,
+motherboard fans and temperatures, battery state and icon, uptime,
+storage throughput and per-mount usage, network throughput per
+interface and wireless signal and IP addresses, weather icon and
+temperature, and month calendar.
+.SH FILES
+.I /proc/stat
+.I /proc/meminfo
+.I sysinfo()
+.I /proc/self/mountinfo
+.I /sys/block/*/stat
+.I /sys/fs/cgroup/memory.current
+.I /sys/fs/cgroup/memory.max
+.I /sys/class/power_supply/BAT*/type
+.I /sys/class/power_supply/BAT*/capacity
+.I /sys/class/power_supply/BAT*/status
+.I /sys/devices/system/cpu/cpu*/cpufreq/
+.I /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+.I /sys/devices/platform/coretemp.0/hwmon/hwmon*/temp1_input
+.I /sys/bus/pci/drivers/k10temp/*/hwmon/hwmon*/temp1_input
+.I /sys/class/drm/card[0-9]/device/
+.I /sys/class/hwmon/hwmon*/
+.I (rtnetlink) routes, addresses/link dumps
+.I (rtnetlink) address/link event monitor (NETLINK_ROUTE, multicast)
+.I (nl80211) wireless signal and SSID (NETLINK_GENERIC)
+.I (SIOCETHTOOL) ETHTOOL_GLINKSETTINGS for wired link speed
+.SH EXIT STATUS
+.B 0
+on success. An unrecognized argument prints an error message to stderr
+and exits with code 1.
+.SH AUTHOR
+Tiago Augusto Pimenta
+.SH REPORTING BUGS
+https://github.com/PepperDev/clock/issues
+.SH COPYRIGHT
+MIT License. Copyright (c) 2026 Tiago Augusto Pimenta.
