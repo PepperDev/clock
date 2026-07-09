@@ -287,6 +287,7 @@ static void fmt_net_line(struct clock_state *ci, const unsigned long long *rd, c
   fmt_wired_lines(ci, rd, td, w, &p);
   if (w >= 0)
     append_wlan_line(ci, &p, rd, td, w);
+  *p = 0;
 }
 
 static void query_station_rate(struct clock_state *ci)

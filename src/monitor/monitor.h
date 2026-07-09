@@ -7,6 +7,7 @@
 struct bat_sample {
   int duration_sec;
   long long power_diff;
+  int biased;
 };
 
 struct async_ctx {
@@ -77,6 +78,10 @@ struct cpu_keep {
   int bat_prev_state;
   time_t bat_change_ts;
   int bat_charge_full_raw;
+  int bat_biased_next_chg;
+  int bat_biased_next_dchg;
+  int bat_unbiased_full_chg;
+  int bat_unbiased_full_dchg;
   int bat_inited;
   unsigned int bat_flags;
   unsigned int mem_flags;
@@ -146,7 +151,7 @@ struct clock_state {
   struct cpu_keep keep;
 };
 
-void get_cpu_info(struct clock_state *ci, time_t now);
+void gather_all(struct clock_state *ci, time_t now);
 void async_ctx_init(struct async_ctx *ctx, int *wan4_fd, int *wan6_fd, int *weather_fd, unsigned int widget_mask);
 
 #endif

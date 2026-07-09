@@ -81,6 +81,7 @@ void check_resize(struct display *d, const struct widget_ctx *w)
   if (!winsize_changed(d, &ws))
     return;
   reset_screen(d);
+  d->sidebar_lines = 0;
   update_layout(d, ws.ws_row, ws.ws_col, w);
   if (ws.ws_xpixel && ws.ws_ypixel) {
     d->cell_w = ws.ws_xpixel / ws.ws_col;

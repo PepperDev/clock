@@ -62,7 +62,7 @@ static int test_rtnl_read_dev(void)
   mk_done_nl(done_buf);
   mock_set_netlink(99, rbuf, rlen, done_buf, sizeof(struct nlmsghdr));
   struct widget_ctx wctx;
-  widget_setup(&wctx, 0, NULL, 1, 1);
+  widget_setup(&wctx, 0, NULL);
   struct net_ctx nc;
   memset(&nc, 0, sizeof nc);
   nc.count = 1;

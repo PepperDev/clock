@@ -19,7 +19,7 @@ static void render_panel(const struct clock_state *ci)
 static int tparg1(void)
 {
   struct args a;
-  if (parse_args(&a, 3, (char *[]) { "clock", "--once", "text", NULL }) != 0 || !a.once || a.mode != MODE_TEXT || a.all)
+  if (parse_args(&a, 3, (char *[]) { "clock", "--once", "text", NULL }) != 0 || !a.once || a.mode != MODE_TEXT)
     return 1;
   return 0;
 }
@@ -27,7 +27,7 @@ static int tparg1(void)
 static int tparg2(void)
 {
   struct args a;
-  if (parse_args(&a, 3, (char *[]) { "clock", "-o", "ascii", NULL }) != 0 || !a.once || a.mode != MODE_ASCII || a.all)
+  if (parse_args(&a, 3, (char *[]) { "clock", "-o", "ascii", NULL }) != 0 || !a.once || a.mode != MODE_ASCII)
     return 2;
   return 0;
 }
@@ -35,7 +35,8 @@ static int tparg2(void)
 static int tparg3(void)
 {
   struct args a;
-  if (parse_args(&a, 3, (char *[]) { "clock", "--all", "-o", NULL }) != 0 || !a.all || !a.once || a.mode != MODE_AUTO)
+  if (parse_args(&a, 3, (char *[]) { "clock", "-S", "-o", NULL }) != 0 || !a.sunday_start || !a.once
+      || a.mode != MODE_AUTO)
     return 3;
   return 0;
 }
@@ -43,7 +44,7 @@ static int tparg3(void)
 static int tparg4(void)
 {
   struct args a;
-  if (parse_args(&a, 2, (char *[]) { "clock", "-a", NULL }) != 0 || !a.all || a.once || a.mode != MODE_AUTO)
+  if (parse_args(&a, 2, (char *[]) { "clock", "-S", NULL }) != 0 || !a.sunday_start || a.mode != MODE_AUTO)
     return 4;
   return 0;
 }
@@ -67,7 +68,7 @@ static int tparg6(void)
 static int tparg7(void)
 {
   struct args a;
-  if (parse_args(&a, 2, (char *[]) { "clock", "sixel", NULL }) != 0 || a.mode != MODE_SIXEL || a.once || a.all)
+  if (parse_args(&a, 2, (char *[]) { "clock", "sixel", NULL }) != 0 || a.mode != MODE_SIXEL || a.once)
     return 7;
   return 0;
 }
@@ -91,40 +92,8 @@ static int tparg9(void)
 static int tparg10(void)
 {
   struct args a;
-  if (parse_args(&a, 1, (char *[]) { "clock", NULL }) != 0 || a.once || a.all || a.mode != MODE_AUTO)
+  if (parse_args(&a, 1, (char *[]) { "clock", NULL }) != 0 || a.once || a.mode != MODE_AUTO)
     return 10;
-  return 0;
-}
-
-static int tparg11(void)
-{
-  struct args a;
-  if (parse_args(&a, 2, (char *[]) { "clock", "--gpu", NULL }) != 0 || !a.gpu || a.fan || a.mode != MODE_AUTO)
-    return 11;
-  return 0;
-}
-
-static int tparg12(void)
-{
-  struct args a;
-  if (parse_args(&a, 2, (char *[]) { "clock", "-g", NULL }) != 0 || !a.gpu)
-    return 12;
-  return 0;
-}
-
-static int tparg13(void)
-{
-  struct args a;
-  if (parse_args(&a, 2, (char *[]) { "clock", "--fan", NULL }) != 0 || !a.fan || a.gpu)
-    return 13;
-  return 0;
-}
-
-static int tparg14(void)
-{
-  struct args a;
-  if (parse_args(&a, 2, (char *[]) { "clock", "-f", NULL }) != 0 || !a.fan)
-    return 14;
   return 0;
 }
 
@@ -291,8 +260,8 @@ static int tparg33(void)
 static int tparg34(void)
 {
   struct args a;
-  if (parse_args(&a, 3, (char *[]) { "clock", "-ow", "-g", NULL }) != 0
-      || !a.once || !a.has_widgets || a.widgets[0] != 0 || !a.gpu)
+  if (parse_args(&a, 3, (char *[]) { "clock", "-ow", "-S", NULL }) != 0
+      || !a.once || !a.has_widgets || a.widgets[0] != 0 || !a.sunday_start)
     return 34;
   return 0;
 }
@@ -346,7 +315,7 @@ static int tparg_g2(void)
 
 static int tparg_g3(void)
 {
-  static int (*const f[])(void) = { tparg11, tparg12, tparg13, tparg14, tparg15 };
+  static int (*const f[])(void) = { tparg15, tparg16 };
   for (size_t i = 0; i < sizeof f / sizeof *f; i++) {
     int r = f[i] ();
     if (r)
@@ -568,8 +537,8 @@ static int test_clock_main_once(void)
 static int test_clock_main_all(void)
 {
   mock_cpu_mem_common("2200000\n", "3700000\n");
-  char *argv[] = { "clock", "--once", "--all", NULL };
-  if (clock_main(3, argv) != 0)
+  char *argv[] = { "clock", "--once", NULL };
+  if (clock_main(2, argv) != 0)
     return 1;
   if (strlen(mock_get_output()) == 0)
     return 2;
@@ -653,7 +622,32 @@ static int test_cleanup(void)
   struct display d = {.cursor_hidden = 1,.is_tty = 1 };
   cleanup_all(&d, &c);
   const char *out = mock_get_output();
-  if (strlen(out) == 0)
+  if (!strchr(out, '\n'))
+    return 1;
+  return 0;
+}
+
+static int test_cleanup_text_no_newline(void)
+{
+  mock_reset();
+  struct clock_state c = { 0 };
+  c.keep.text = 1;
+  struct display d = {.cursor_hidden = 1,.is_tty = 1 };
+  cleanup_all(&d, &c);
+  const char *out = mock_get_output();
+  if (strchr(out, '\n'))
+    return 1;
+  return 0;
+}
+
+static int test_cleanup_gfx_newline_no_cursor(void)
+{
+  mock_reset();
+  struct clock_state c = { 0 };
+  struct display d = {.cursor_hidden = 0,.is_tty = 0 };
+  cleanup_all(&d, &c);
+  const char *out = mock_get_output();
+  if (!strchr(out, '\n'))
     return 1;
   return 0;
 }
@@ -684,7 +678,7 @@ static int test_render_panel_fan(void)
   mock_reset();
   struct clock_state ci;
   memset(&ci, 0, sizeof ci);
-  widget_setup(&ci.keep.widget, 1, "FAN", 0, 0);
+  widget_setup(&ci.keep.widget, 1, "FAN");
   snprintf(ci.fan_line, sizeof ci.fan_line, "%s", "FAN 2200RPM 1500RPM\n38\xc2\xb0" "C 42\xc2\xb0" "C\n");
   render_panel(&ci);
   const char *out = mock_get_output();
@@ -700,7 +694,7 @@ static int test_render_panel(void)
   mock_reset();
   struct clock_state ci;
   memset(&ci, 0, sizeof ci);
-  widget_setup(&ci.keep.widget, 1, "DATE", 0, 0);
+  widget_setup(&ci.keep.widget, 1, "DATE");
   snprintf(ci.date_str, sizeof ci.date_str, "%s", "Thu 12 Jun 2026");
   render_panel(&ci);
   const char *out = mock_get_output();
@@ -716,7 +710,7 @@ static int test_render_panel_no_bat(void)
   mock_reset();
   struct clock_state ci;
   memset(&ci, 0, sizeof ci);
-  widget_setup(&ci.keep.widget, 1, "BAT", 0, 0);
+  widget_setup(&ci.keep.widget, 1, "BAT");
   ci.bat_pct = -1;
   render_panel(&ci);
   const char *out = mock_get_output();
@@ -730,7 +724,7 @@ static int test_render_panel_bat(void)
   mock_reset();
   struct clock_state ci;
   memset(&ci, 0, sizeof ci);
-  widget_setup(&ci.keep.widget, 1, "BAT", 0, 0);
+  widget_setup(&ci.keep.widget, 1, "BAT");
   ci.bat_pct = 85;
   ci.bat_charging = 0;
   render_panel(&ci);
@@ -742,9 +736,9 @@ static int test_render_panel_bat(void)
 
 static int test_render_wrapped(void)
 {
-  if (render_wrapped("line1\nline2\n", 0, 0, "") < 1)
+  if (render_wrapped("line1\nline2\n", 0, 0, "", 0) < 1)
     return 1;
-  if (render_wrapped("abc def", 4, 1, "\033[6G") < 1)
+  if (render_wrapped("abc def", 4, 1, "\033[6G", 0) < 1)
     return 2;
   return 0;
 }
@@ -756,7 +750,7 @@ static int test_wl_fallback(void)
     return 1;
   memset(s, 'A', 4100);
   s[4100] = 0;
-  int lines = render_wrapped(s, 4100, TTY_CUP, "");
+  int lines = render_wrapped(s, 4100, TTY_CUP, "", 0);
   free(s);
   if (lines < 1)
     return 2;
@@ -811,6 +805,8 @@ int main(void)
     {"test_clock_main_once", test_clock_main_once, 900},
     {"test_clock_main_all", test_clock_main_all, 950},
     {"test_cleanup", test_cleanup, 1000},
+    {"test_cleanup_text_no_newline", test_cleanup_text_no_newline, 1001},
+    {"test_cleanup_gfx_newline_no_cursor", test_cleanup_gfx_newline_no_cursor, 1002},
     {"test_render_ascii", test_render_ascii, 1100},
     {"test_position_cursor", test_position_cursor, 1200},
     {"test_render_panel", test_render_panel, 1300},

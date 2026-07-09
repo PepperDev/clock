@@ -141,6 +141,7 @@ void get_cpu_extra(struct clock_state *ci);
 void mem_usage(struct clock_state *ci);
 void get_container_mem(struct clock_state *ci);
 void get_battery(struct clock_state *ci);
+void bat_estimate(struct clock_state *ci, int cur_raw, int state, time_t now);
 void get_uptime(struct clock_state *ci);
 
 struct netlink_ctx {

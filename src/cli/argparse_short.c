@@ -11,9 +11,6 @@
 
 static const unsigned short SHORT_OFF[256] = {
   ['o'] = offsetof(struct args, once),
-  ['a'] = offsetof(struct args, all),
-  ['g'] = offsetof(struct args, gpu),
-  ['f'] = offsetof(struct args, fan),
   ['S'] = offsetof(struct args, sunday_start),
   ['w'] = REJ,['I'] = REJ,['W'] = REJ,
 };

@@ -80,7 +80,7 @@ static int check_sixel(const char *out)
 
 static int test_render_sixel(void)
 {
-  widget_setup(&wctx, 0, NULL, 0, 0);
+  widget_setup(&wctx, 0, NULL);
   struct display d;
   memset(&d, 0, sizeof d);
   d.wsrow = 24;
@@ -102,7 +102,7 @@ static int test_render_sixel(void)
 
 int main(void)
 {
-  widget_setup(&wctx, 0, NULL, 0, 0);
+  widget_setup(&wctx, 0, NULL);
   int rc;
   rc = test_da1_parse();
   if (rc) {

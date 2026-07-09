@@ -68,6 +68,8 @@ static int def_route_cb(const struct nlmsghdr *nh, void *arg)
   unsigned metric = ~0U;
   route_oif_metric(nh, &oif, &metric);
   if (oif >= 0) {
+    if (metric == ~0U)
+      metric = 0;
     update_best(a, oif, metric);
     record_gw(a, oif, metric);
   }

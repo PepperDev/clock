@@ -15,7 +15,8 @@ static const struct {
   {"proc", 4}, {"sysfs", 5}, {"tmpfs", 5}, {"devtmpfs", 8}, {"cgroup", 6},
   {"debugfs", 7}, {"tracefs", 7}, {"pstore", 6}, {"securityfs", 10}, {"hugetlbfs", 9},
   {"configfs", 8}, {"efivarfs", 8}, {"bpf", 3}, {"autofs", 6}, {"overlay", 7},
-  {"squashfs", 8}, {"devpts", 6}, {"mqueue", 6}
+  {"squashfs", 8}, {"devpts", 6}, {"mqueue", 6}, {"fusectl", 7}, {"nsfs", 4},
+  {"binfmt_misc", 11}
 };
 
 static int skip_fstype(const char *fstype)

@@ -73,7 +73,7 @@ static int any_data_widget(const struct widget_ctx *w)
   return w->active_mask & m;
 }
 
-void get_cpu_info(struct clock_state *ci, time_t now)
+void gather_all(struct clock_state *ci, time_t now)
 {
   if (!any_data_widget(&ci->keep.widget))
     return;

@@ -24,10 +24,10 @@ struct widget_ctx {
 
 int widget_validate(const char *str);
 int widget_parse_list(const char *str, WidgetType * out, int max);
-int widget_default_order(WidgetType * out, int gpu, int fan);
+int widget_default_order(WidgetType * out);
 void widget_set_active(struct widget_ctx *ctx, const WidgetType * set, int count);
 const WidgetType *widget_get_active(const struct widget_ctx *ctx, int *count);
-void widget_setup(struct widget_ctx *ctx, int has_widgets, const char *widgets, int gpu, int fan);
+void widget_setup(struct widget_ctx *ctx, int has_widgets, const char *widgets);
 
 static inline int widget_active(const struct widget_ctx *ctx, WidgetType t)
 {

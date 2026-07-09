@@ -314,21 +314,26 @@ return read_speed_gset(fd, c->iface[i]);
 
 ### Init-ordering: `restore_weather` must run after `poll_async_fetches`
 
-The `tick()` function in `main.c:173-187` calls `get_cpu_info` (which calls `restore_weather` inside),
-then `poll_async_fetches` (which can update `keep.weather_valid` + `keep.weather_temp/desc` via
-`pump_weather_ok`), then `do_render` (which reads `ci->weather_temp/desc`).
+The `tick()` function in `main_loop.c` calls `poll_async_fetches` (which updates
+`keep.weather_valid` + `keep.weather_temp/desc` via `pump_weather_ok`), then
+`restore_weather` (which copies `keep→ci`), then `do_render` (which reads
+`ci->weather_temp/desc`).
 
 If `restore_weather` runs before `poll_async_fetches`, the fresh data from pump is written to
 `keep` but never propagated to `ci`, so `ci->weather_temp == 0 && !ci->weather_desc[0]`
-is true → empty widget for one tick. After the fix, `restore_weather` is called a second time
-right after `poll_async_fetches`, just before `do_render`.
+is true → empty widget for one tick.
 
 **Root cause**: `restore_weather` copies `keep→ci` but `pump_weather_ok` updates `keep` later
 in the same function. The copy-before-update window drops one tick's worth of data.
 
+Exception — `--once` mode: `restore_weather` is not preceded by `poll_async_fetches`.
+Instead, `gather_all` runs before `once_wait` (which pumps results via `once_pump_results`),
+and `restore_weather` runs after `once_wait`. The ordering constraint
+(pump-before-restore) is satisfied by `once_pump_results` → `restore_weather`.
+
 Common mistakes:
 - Assuming `pump_weather_ok` writes directly to `ci` fields (it doesn't — it writes to `keep`)
-- Adding a new "restore" operation in `get_cpu_info` without checking whether callers expect
+- Adding a new "restore" operation in `gather_all` without checking whether callers expect
   it to run before or after async pumps
 
 When modifying `tick()` or the weather/WAN pipeline:
@@ -368,12 +373,12 @@ overwrote it with stale `keep.ipv6_local`.
 
 Common mistakes:
 - Adding a fix to `ld_refresh` without mirroring it to `refresh_local_ip_once`.
-- Calling `refresh_local_ip_once` before `get_cpu_info` has populated `net.count`
+- Calling `refresh_local_ip_once` before `gather_all` has populated `net.count`
   and opened `rtnl.fd`.
 
 When modifying either function, check:
 - Does the other function need the same change?
-- Is the call site after `get_cpu_info` (so `net.count` and `rtnl.fd` are ready)?
+- Is the call site after `gather_all` (so `net.count` and `rtnl.fd` are ready)?
 
 ### Entry template (for project-specific entries)
 
@@ -400,6 +405,36 @@ Areas that commonly produce project-specific entries:
 - **Variable-length encoding**: always validate remaining buffer length against declared length before reading
 - **Cross-resource lifecycle**: paired acquire-use-release across subsystems — verify cleanup on ALL error paths
 ```
+
+### Netlink address dump: `rtnl_dump` must use correct data struct per message type
+
+`rtnl_dump` sends a family-filtered dump request to the kernel. With
+`NETLINK_GET_STRICT_CHK` enabled (kernel 6.x+), the kernel validates
+`nlmsg_len` against the expected struct for the message type:
+`RTM_GETADDR` expects `struct ifaddrmsg`, `RTM_GETLINK` expects
+`struct ifinfomsg`, etc. Using the wrong struct size causes the kernel
+to silently return zero results — no error, no messages, just an empty
+dump.
+
+Common mistakes:
+- Using a generic `struct ifinfomsg` for all dump types because all
+  request structs share `unsigned char family` as their first field.
+  The family byte is accepted regardless of struct size, but the kernel
+  rejects the wrong `nlmsg_len` under strict checking.
+- Not noticing the dump succeeds (returns 0) while producing no output
+  — the error is invisible to the caller.
+
+When modifying `rtnl_dump` or adding a new netlink dump function, check:
+- Does the message type (`RTM_GETADDR`, `RTM_GETLINK`, `RTM_GETROUTE`,
+  etc.) use the correct kernel struct for `nlmsg_len`?
+- If adding a new message type to `rtnl_dump`, add a branch for its
+  struct size.
+- If the kernel adds strict checking for a new message type, existing
+  dump functions may silently break.
+
+Correct pattern: separate by message type with matching struct sizes
+(`struct ifaddrmsg` for `RTM_GETADDR`, `struct ifinfomsg` for
+`RTM_GETLINK`, `struct rtmsg` for `RTM_GETROUTE`).
 
 ### Three-tier async HTTP architecture (DNS + I/O thread + main loop)
 

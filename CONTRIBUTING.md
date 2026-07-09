@@ -125,10 +125,12 @@ resolved at the root cause by refactoring the code.
 
 Follow the action table below strictly. Do not circumvent metrics by using
 ternary operators (`? :`) instead of `if`/`else`, merging unrelated statements
-onto one line, or similar cosmetic workarounds — address the structural issue
-directly. Any cosmetic attempt to reduce line count (collapsing `if`/`for`/`while`
-bodies onto the same line, removing blank lines, joining unrelated statements)
-will be undone by `make format` anyway, so it is always wasted effort.
+onto one line, replacing `&&`/`||` with bitwise `&`/`|` to dodge cyclomatic
+complexity counting, or similar cosmetic workarounds — address the structural
+issue directly. Any cosmetic attempt to reduce line count (collapsing
+`if`/`for`/`while` bodies onto the same line, removing blank lines, joining
+unrelated statements) will be undone by `make format` anyway, so it is always
+wasted effort.
 
 | Issue | Required action |
 |---|---|

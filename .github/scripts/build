@@ -15,7 +15,7 @@ HOME=/tmp/w nsenter "--setuid=$uid" "--setgid=$uid" "--wd=/tmp/w" sh -es <<'BUIL
 echo "=== Checkout ==="
 git init -q
 git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-git fetch -q origin "${GITHUB_SHA}"
+git fetch -q --depth=1 origin "${GITHUB_SHA}"
 git checkout -qf "${GITHUB_SHA}"
 
 echo "=== Format check ==="
@@ -50,26 +50,15 @@ echo "=== Coverage summary ==="
   echo ''
   echo '| Module | Lines | Coverage |'
   echo '|--------|------:|---------:|'
-  find obj/cov -name '*.gcda' ! -name '*syscall.gcda' 2>/dev/null | while IFS= read -r g; do
-    base=${g%.gcda}
-    src=$(echo "$base" | sed 's|obj/cov/|src/|').c
-    gcov -o "$base" -s . "src/${src#src/}" 2>/dev/null
-  done | awk -v sq="'" '
-    /^File / {
-      n = split($0, a, sq)
-      module = a[2]
-      sub(/^src\//, "", module)
-      sub(/\.c$/, "", module)
-    }
-    /^Lines executed:/ {
-      if (seen[module]++) next
-      split($0, a, ":")
-      rest = a[2]
-      split(rest, b, "%")
-      split(b[2], c, "of")
-      printf("%f|%d|%s\n", b[1] + 0, c[2] + 0, module)
-    }
-  ' | sort -t'|' -k1 -rn | awk -F'|' '
+  awk '/Lines executed:/ && NF >= 5 {
+    split($2, a, ":")
+    pct = a[2] + 0
+    t = $4 + 0
+    module = $5
+    sub(/^src\//, "", module)
+    sub(/\.c$/, "", module)
+    printf("%f|%d|%s\n", pct, t, module)
+  }' obj/gcov/gcov.txt | sort -t'|' -k1 -rn | awk -F'|' '
     {
       printf("| %s | %d | %.2f%% |\n", $3, $2, $1)
     }

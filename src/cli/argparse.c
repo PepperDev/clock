@@ -14,9 +14,6 @@ static const char HELP_STR[] =
     "Options:\n"
     "  -h, --help             Print this help and exit\n"
     "  -o, --once             Run once and exit\n"
-    "  -a, --all              Show --gpu --fan together (without --widgets)\n"
-    "  -g, --gpu              Enable GPU monitoring (without --widgets)\n"
-    "  -f, --fan              Enable motherboard fans + temps (without --widgets)\n"
     "  -S, --sunday-start     Calendar starts on Sunday\n"
     "  -w, --widgets <list>   Comma-separated widget list\n"
     "  -I, --ip-refresh <n>   Public IP refresh interval (default 86400)\n"
@@ -145,45 +142,6 @@ static int b_once(struct args *a, const char *p)
   return -1;
 }
 
-static int b_all(struct args *a, const char *p)
-{
-  if (!strcmp(p, "--all")) {
-    a->all = 1;
-    return 0;
-  }
-  if (!strcmp(p, "-a")) {
-    a->all = 1;
-    return 0;
-  }
-  return -1;
-}
-
-static int b_gpu(struct args *a, const char *p)
-{
-  if (!strcmp(p, "--gpu")) {
-    a->gpu = 1;
-    return 0;
-  }
-  if (!strcmp(p, "-g")) {
-    a->gpu = 1;
-    return 0;
-  }
-  return -1;
-}
-
-static int b_fan(struct args *a, const char *p)
-{
-  if (!strcmp(p, "--fan")) {
-    a->fan = 1;
-    return 0;
-  }
-  if (!strcmp(p, "-f")) {
-    a->fan = 1;
-    return 0;
-  }
-  return -1;
-}
-
 static int b_sun(struct args *a, const char *p)
 {
   if (!strcmp(p, "--sunday-start")) {
@@ -200,12 +158,6 @@ static int b_sun(struct args *a, const char *p)
 static int bool_flags(struct args *a, const char *p)
 {
   if (b_once(a, p) == 0)
-    return 0;
-  if (b_all(a, p) == 0)
-    return 0;
-  if (b_gpu(a, p) == 0)
-    return 0;
-  if (b_fan(a, p) == 0)
     return 0;
   if (b_sun(a, p) == 0)
     return 0;
@@ -260,14 +212,6 @@ static int parse_one(struct args *a, const char *p, const char *n)
   return parse_dash(a, p, n);
 }
 
-static void apply_all(struct args *a)
-{
-  if (!a->has_widgets && a->all) {
-    a->gpu = 1;
-    a->fan = 1;
-  }
-}
-
 int parse_args(struct args *a, int argc, char **argv)
 {
   memset(a, 0, sizeof *a);
@@ -287,6 +231,5 @@ int parse_args(struct args *a, int argc, char **argv)
     }
     i += t;
   }
-  apply_all(a);
   return 0;
 }

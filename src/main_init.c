@@ -53,7 +53,9 @@ enum mode resolve_mode(enum mode m, int tty)
 static void init_clock(const struct args *a, struct clock_state *c, unsigned long long t0)
 {
   struct cpu_keep *k = &c->keep;
-  widget_setup(&k->widget, a->has_widgets, a->widgets, a->gpu, a->fan);
+  k->nlk.fd = -1;
+  widget_setup(&k->widget, a->has_widgets, a->widgets);
+  k->active_mask = k->widget.active_mask;
   async_ctx_init(&k->async, &k->wan4_fd, &k->wan6_fd, &k->weather_fd, k->widget.active_mask);
   start_fetches(c, t0, a->once, a->ip_refresh, a->weather_refresh);
 }

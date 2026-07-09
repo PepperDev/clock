@@ -68,20 +68,15 @@ int widget_validate(const char *str)
 }
 
 // cppcheck-suppress staticFunction -- exposed for unit testing via widget.h
-int widget_default_order(WidgetType *out, int gpu, int fan)
+int widget_default_order(WidgetType *out)
 {
   static const WidgetType BASE[] = {
     WIDGET_DATE, WIDGET_CPU, WIDGET_MEM, WIDGET_GPU, WIDGET_FAN,
     WIDGET_BAT, WIDGET_UP, WIDGET_STO, WIDGET_NET, WIDGET_WEATHER, WIDGET_CAL
   };
   int n = 0;
-  for (int i = 0; i < WIDGET_COUNT; i++) {
-    if (!gpu && BASE[i] == WIDGET_GPU)
-      continue;
-    if (!fan && BASE[i] == WIDGET_FAN)
-      continue;
+  for (int i = 0; i < WIDGET_COUNT; i++)
     out[n++] = BASE[i];
-  }
   return n;
 }
 
@@ -103,13 +98,13 @@ const WidgetType *widget_get_active(const struct widget_ctx *ctx, int *count)
   return ctx->active_set;
 }
 
-void widget_setup(struct widget_ctx *ctx, int has_widgets, const char *widgets, int gpu, int fan)
+void widget_setup(struct widget_ctx *ctx, int has_widgets, const char *widgets)
 {
   WidgetType wset[WIDGET_COUNT];
   int n;
   if (has_widgets)
     n = widget_parse_list(widgets, wset, WIDGET_COUNT);
   else
-    n = widget_default_order(wset, gpu, fan);
+    n = widget_default_order(wset);
   widget_set_active(ctx, wset, n);
 }

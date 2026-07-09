@@ -119,20 +119,17 @@ endif
 	for f in $$(find $(CURDIR)/$(COV_DIR) -name '*.gcda' ! -name '*syscall.gcda' 2>/dev/null); do \
 		base=$${f%.gcda}; \
 		src=$$(echo $$base | sed 's|$(CURDIR)/$(COV_DIR)/|$(CURDIR)/src/|').c; \
-		gcov -o "$$base" -s "$(CURDIR)" "$$src" 2>/dev/null | grep 'Lines executed' | tail -1; \
+		src_rel=$$(echo $$base | sed 's|$(CURDIR)/$(COV_DIR)/|src/|').c; \
+		gcov -o "$$base" -s "$(CURDIR)" "$$src" 2>/dev/null | grep 'Lines executed' | tail -1 | sed "s|\$$|  $$src_rel|"; \
 	done > gcov.txt; \
 	data=$$(cat gcov.txt); \
 	echo "$$data" | sed 's/Lines executed://; s/% of / /' | \
 	awk '{t+=$$2; c+=$$2*$$1/100} END {p=c/t*100; printf "Coverage: %.2f%% (%d/%d lines)\n", p, c, t; if (p < 80.0) {printf "[FAIL] coverage below 80%%\n"; exit 1}}'
 
 cov-list:
-	@for f in $$(find $(CURDIR)/$(COV_DIR) -name '*.gcda' ! -name '*syscall.gcda' 2>/dev/null); do \
-	  base=$${f%.gcda}; \
-	  src=$$(echo $$base | sed 's|$(CURDIR)/$(COV_DIR)/|src/|').c; \
-	  gcov -o "$$base" -s "$(CURDIR)" "$(CURDIR)/$$src" 2>/dev/null; \
-	done | awk '/^File /{f=substr($$2,2,length($$2)-2)} /Lines executed:/ && f ~ /\.c$$/{split($$2,a,":"); pct=a[2]+0; t=$$4+0; e=int(pct*t/100+0.5); if(pct<80 && t>0) printf "%5.1f%% (%d/%d)  %s\n",pct,e,t,f}' | sort -t/ -k1 -n | uniq
+	@awk '/Lines executed:/ && NF >= 5 { split($$2,a,":"); pct=a[2]+0; t=$$4+0; e=int(pct*t/100+0.5); f=$$5; if(pct<80 && t>0) printf "%5.1f%% (%d/%d)  %s\n",pct,e,t,f }' $(GCOV_DIR)/gcov.txt 2>/dev/null | sort -t/ -k1 -n
 
-report:
+report: format
 	@RC=0; \
 	echo "=== cppcheck ==="; \
 	out=$$(make --no-print-directory cppcheck 2>&1) || { \

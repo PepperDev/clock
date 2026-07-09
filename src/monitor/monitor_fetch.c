@@ -192,20 +192,6 @@ void poll_async_fetches(struct clock_state *ci, time_t now)
   }
 }
 
-static int any_wan_ready(struct clock_state *ci)
-{
-  struct async_ctx *ctx = &ci->keep.async;
-  pthread_mutex_lock(&ctx->wan4_result.lock);
-  int v4 = ctx->wan4_result.state >= HTTP_DONE;
-  pthread_mutex_unlock(&ctx->wan4_result.lock);
-  if (v4)
-    return 1;
-  pthread_mutex_lock(&ctx->wan6_result.lock);
-  int v6 = ctx->wan6_result.state >= HTTP_DONE;
-  pthread_mutex_unlock(&ctx->wan6_result.lock);
-  return v6;
-}
-
 static void once_net_cleanup(struct clock_state *ci)
 {
   struct async_ctx *ctx = &ci->keep.async;
@@ -216,9 +202,48 @@ static void once_net_cleanup(struct clock_state *ci)
   http_result_cancel(&ctx->wan6_result);
 }
 
+static int wan_result_terminal(const struct http_result *hr)
+{
+  return hr->state == HTTP_DONE || hr->state == HTTP_ERROR;
+}
+
+static int wan_result_ready(struct http_result *hr)
+{
+  pthread_mutex_lock(&hr->lock);
+  int r = wan_result_terminal(hr);
+  pthread_mutex_unlock(&hr->lock);
+  return r;
+}
+
+static void wan_try_read(struct http_result *hr)
+{
+  if (pthread_mutex_trylock(&hr->lock) == 0)
+    pthread_mutex_unlock(&hr->lock);
+}
+
+static int check_one_wan(struct http_result *hr, struct http_result *other)
+{
+  if (!wan_result_ready(hr))
+    return 0;
+  wan_try_read(other);
+  return 1;
+}
+
+static int both_wan_ready(struct clock_state *ci)
+{
+  struct async_ctx *ctx = &ci->keep.async;
+  if (ci->keep.ipv4_local[0] && ci->keep.ipv6_local[0])
+    return wan_result_ready(&ctx->wan4_result) && wan_result_ready(&ctx->wan6_result);
+  if (ci->keep.ipv4_local[0])
+    return check_one_wan(&ctx->wan4_result, &ctx->wan6_result);
+  if (ci->keep.ipv6_local[0])
+    return check_one_wan(&ctx->wan6_result, &ctx->wan4_result);
+  return 1;
+}
+
 static int active_wan_ready(struct clock_state *ci)
 {
-  return !widget_active(&ci->keep.widget, WIDGET_NET) || any_wan_ready(ci);
+  return !widget_active(&ci->keep.widget, WIDGET_NET) || both_wan_ready(ci);
 }
 
 static int active_weather_ready(struct clock_state *ci)
@@ -242,17 +267,17 @@ static void once_cleanup_widgets(struct clock_state *ci)
 
 static int async_done(struct clock_state *ci)
 {
-  return active_wan_ready(ci) && active_weather_ready(ci);
+  return active_weather_ready(ci) && active_wan_ready(ci);
 }
 
 static void once_pump_results(struct clock_state *ci, unsigned long long now)
 {
+  if (widget_active(&ci->keep.widget, WIDGET_WEATHER))
+    pump_weather_result(ci, now);
   if (widget_active(&ci->keep.widget, WIDGET_NET)) {
     pump_wan_result(ci, 0, now);
     pump_wan_result(ci, 1, now);
   }
-  if (widget_active(&ci->keep.widget, WIDGET_WEATHER))
-    pump_weather_result(ci, now);
 }
 
 void once_wait(struct clock_state *ci, unsigned long long t0)

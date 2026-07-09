@@ -89,11 +89,8 @@ clock [OPTIONS] [auto|text|ascii|sixel]
 |------|-------|--------|-------------|---------|
 | `--help` | `-h` | no | Print usage summary to stdout and exit 0 | — |
 | `--once` | `-o` | no | Print output once and exit. No 1-second loop. | — |
-| `--all` | `-a` | no | Enable `--gpu --fan` together. Only effective without `--widgets`. | — |
-| `--gpu` | `-g` | no | Enable GPU widget in default mode. Only effective without `--widgets`. | — |
-| `--fan` | `-f` | no | Enable FAN widget (fans + temps) in default mode. Only effective without `--widgets`. | — |
 | `--sunday-start` | `-S` | no | Calendar week starts on Sunday instead of Monday. | Monday |
-| `--widgets` | `-w` | `<list>` | Comma-separated widget names defining sidebar content and order. Overrides `--gpu`/`--fan`/`--all`. | *(default set)* |
+| `--widgets` | `-w` | `<list>` | Comma-separated widget names defining sidebar content and order. All widgets always-on in default mode. | *(default set)* |
 | `--ip-refresh` | `-I` | `<sec>` | Refresh interval for public IP addresses in seconds. | 86400 (24h) |
 | `--weather-refresh` | `-W` | `<sec>` | Refresh interval for weather data in seconds. | 1800 (30min) |
 
@@ -172,10 +169,10 @@ All read paths are scoped to the active widget set (see CONTRIBUTING.md §Design
 9. Keyboard echo is suppressed only when all four conditions hold: the resolved mode is ascii or sixel (not text), stdout is a TTY, **stdin is a TTY**, and the program is in loop mode (not `--once`). In text mode, `--once` mode, or when stdout or stdin is not a TTY, echo is never touched — neither suppressed nor restored.
 10. The cursor is hidden during operation and restored on exit (via `cleanup_all`, called from both SIGINT/SIGTERM handler and before main return). Cursor hide (`\033[?25l`) is only emitted when all three conditions hold: ascii or sixel mode, stdout is a TTY, and loop mode (not `--once`). Cursor show (`\033[?25h`) is only emitted on exit if the cursor was previously hidden — if the program never called hide, it must not call show.
 
-11. On terminal resize (`SIGWINCH`), `check_resize` re-reads window size and calls `tick_render`, which emits RIS (`\033c`). RIS resets the terminal emulator — including cursor visibility — to its default (visible). After the render, the cursor is re-hidden (`\033[?25l`) if it was hidden before. This preserves the invariant: cursor is always hidden during loop-mode operation, even after resize.
-11. All machine monitoring data is gathered internally — no external binaries are invoked.
-12. Public IPv4 is fetched via HTTP GET from `api.ipify.org`, IPv6 from `api6.ipify.org`. Weather is fetched from `wttr.in/?format=j1`.
-13. HTTP requests (WAN IP, weather) use a **three-tier async architecture**:
+11. On terminal resize (`SIGWINCH`), `check_resize` re-reads window size, emits RIS (`\033c`), and recomputes layout. The resize check runs **after** data gathering but **before** rendering, so a SIGWINCH that arrives during async data fetching (WAN IP, weather) is caught in the same tick — no ghost frame at the old layout. After RIS, `d->sidebar_lines` is reset to 0 so the scroll-based clearing logic (`update_sidebar_lines`) does not emit `\033[K\n` past the new terminal height. RIS resets the terminal emulator — including cursor visibility — to its default (visible). After the render, the cursor is re-hidden (`\033[?25l`) if it was hidden before. This preserves the invariant: cursor is always hidden during loop-mode operation, even after resize.
+12. All machine monitoring data is gathered internally — no external binaries are invoked.
+13. Public IPv4 is fetched via HTTP GET from `api.ipify.org`, IPv6 from `api6.ipify.org`. Weather is fetched from `wttr.in/?format=j1`.
+14. HTTP requests (WAN IP, weather) use a **three-tier async architecture**:
     - **Parallel DNS threads** (one per target) run blocking `getaddrinfo`
       and write results to `struct dns_slot` under a mutex.
     - **Single dedicated I/O thread** uses non-blocking `poll()` to handle
@@ -187,12 +184,12 @@ All read paths are scoped to the active widget set (see CONTRIBUTING.md §Design
       loop MAY close socket fds directly during cancellation (wan/weather
       restart) and cleanup (`once_net_cleanup`, `weather_cleanup`,
       `cleanup_net`), but never performs I/O (connect/send/recv) on them.
-14. While a response is pending in continuous mode: WAN/WAN6 lines are
+15. While a response is pending in continuous mode: WAN/WAN6 lines are
     **omitted** from the NET widget (not emitted at all); weather shows a
     single dash `-`. In `--once` mode, all three fetch attempts run in
     parallel with a **3-second total deadline** — stragglers are cancelled
     and their results omitted.
-15. If a request fails (timeout, connection refused, parse error), the
+16. If a request fails (timeout, connection refused, parse error), the
     previous cycle's data is retained in continuous mode. The failed target
     enters exponential backoff. DNS backoff is shorter (1<<n), connect/HTTP
     backoff is longer (2<<n). See [Retry Landscape](#retry-landscape) for the
@@ -202,8 +199,8 @@ All read paths are scoped to the active widget set (see CONTRIBUTING.md §Design
     shows dash if never valid or cached data if available). Only a network-change
      event (address add/del or link add/del from the monitor FIFO) resets the
      try counters and reactivates the target.
-16. No kernel module loading is performed. If a hwmon driver is already loaded, its sysfs nodes are used; otherwise the sensor is unavailable.
-17. Netlink event monitoring uses a **monitor thread** holding a dedicated
+17. No kernel module loading is performed. If a hwmon driver is already loaded, its sysfs nodes are used; otherwise the sensor is unavailable.
+18. Netlink event monitoring uses a **monitor thread** holding a dedicated
     `NETLINK_ROUTE` socket subscribed to `RTMGRP_IPV4_IFADDR |
     RTMGRP_IPV6_IFADDR | RTMGRP_LINK | RTMGRP_IPV4_ROUTE |
     RTMGRP_IPV6_ROUTE`. The thread blocks on `recvmsg` inside a `poll(100)`
@@ -277,24 +274,19 @@ Data sources for each widget are detailed in [Machine Monitoring — Data Source
 
 ### Default mode (no `--widgets`)
 
-The sidebar uses this fixed order, with GPU and FAN conditionally included based on `--gpu`/`--fan`/`--all`:
+The sidebar uses this fixed order, with all widgets always-on:
 
 ```
-DATE → CPU → MEM → GPU[?] → FAN[?] → BAT → UP → STO → NET → WEATHER → CAL
+DATE → CPU → MEM → GPU → FAN → BAT → UP → STO → NET → WEATHER → CAL
 ```
-
-- GPU shown only if `--gpu` or `--all` is given.
-- FAN shown only if `--fan` or `--all` is given.
-- All other widgets are always-on in default mode.
 
 ### Custom mode (`--widgets=<list>`)
 
 When `--widgets` is given:
-1. `--gpu` / `--fan` / `--all` have no effect.
-2. The comma-separated list defines exactly which widgets appear and in what order.
-3. Widget names are case-insensitive.
-4. Unknown widget names cause the program to exit with an error.
-5. `--widgets ''` (empty string) disables the sidebar entirely. The clock uses the full terminal width.
+1. The comma-separated list defines exactly which widgets appear and in what order.
+2. Widget names are case-insensitive.
+3. Unknown widget names cause the program to exit with an error.
+4. `--widgets ''` (empty string) disables the sidebar entirely. The clock uses the full terminal width.
 
 Examples:
 ```
@@ -346,6 +338,10 @@ Vertical positioning differs by mode:
 - **Continuous (loop) mode**: the clock is vertically centered and the sidebar starts at the **top row** (row 0).
 - **`--once` mode (TTY, ascii or sixel)**: the clock renders inline at the cursor position — no vertical `position_cursor` CUP, but **horizontally centered** via cursor-forward `\033[<N>C` (`render_line` for ascii, equivalent for sixel). The sidebar is positioned at the **same Y** where the clock started, via relative cursor-up `\033[%dA`. Since cursor-up inherently handles scrolling, no scroll-adjustment formula is needed.
 - **`--once` mode (non-TTY)**: no cursor-positioning escapes at all — clock renders at current cursor column, left-aligned.
+
+Sidebar truncation (continuous loop mode only): when the number of sidebar rows (after wrapping long lines) would exceed the terminal height (`wsrow`), excess rows are silently dropped. If the terminal is resized to a smaller height, the sidebar is truncated to the new height on the next tick — no scroll-back or scroll-forward occurs. The sidebar is always a window into the widget content that fits the current terminal height, never longer.
+
+Frame separation between ticks differs by mode: text mode outputs a `\n` between frames (producing a blank line separator); ascii and sixel modes use absolute CUP positioning and emit no `\n` between frames, relying on cursor-position escapes to move to the clock's start row each tick. On exit, a `\n` is emitted before cursor-show to ensure the shell prompt lands on a fresh line rather than at the cursor's last sidebar position.
 
 Screen split applies to ascii and sixel modes only — text mode outputs plain `HH:MM:SS` without layout splitting.
 
@@ -510,7 +506,7 @@ Always `%d°C` (integer Celsius).
 | `BAT` | `BAT` | *(dynamic)* | Text mode: `BAT NN% charging/discharging/full`; Ascii/sixel: `<icon:⚡🔋🪫> NN%` (icon before percentage, no `BAT` label) | After percentage, append space + arrow + time estimate when samples exist: `↓ 2h 15m` (discharging) or `↑ 45m` (charging). When no samples exist, no arrow/time appended. Full/Not charging always shows no estimate. Ascii/sixel mode: same arrow/time appended. |
 | `UP` | `UP` | ⏱️ (`U+23F1` + VS16) | `<text:UP / icon:⏱️> Nd Nh Nm` |
 | `STO` | `STO` | 🗄️ (`U+1F5C4` + VS16) | `<text:STO / icon:🗄️> device ↓N↑N/s`; `mount NN% N/N`; `device NN°C ↓N↑N/s` | Throughput unit per [Data-size thresholds](#data-size-thresholds) (b→K→M chain). Usage unit per same rules. Each direction (read/write) has independent unit. Arrow: ↓ read, ↑ write. |
-| `NET` | *(none)* | 🌐 (`U+1F310`) | Each NIC on its own line (no blank lines): `iface ↓N↑N/s [linkspeed]`; wireless when present: `wlan0 ↓N↑N/s ▂▄▆█ -NNdBm` (bars per [Wireless signal bars](#wireless-signal-bars); padding per [Mode-specific rendering](#mode-specific-rendering)); SSID line (ascii/sixel): `<icon:🛜> <name> N.N/N.NG` / `<icon:🛜> <name> NN/NNM` — text mode: `SSID <name> ...`; then (ascii/sixel): `<icon:📡> <addr>` (IP line), `<icon:🌍> <addr>` (WAN line) — text mode: `IP <addr>`, `IP6 <addr>`, `WAN <addr>`, `WAN6 <addr>` | Throughput per [Network throughput thresholds](#network-throughput-thresholds). Wireless rate per [Wireless link rate](#wireless-link-rate). Link speed per [Wired link speed](#wired-link-speed). Arrow: ↓ rx, ↑ tx. |
+| `NET` | *(none)* | 🌐 (`U+1F310`) | Each NIC on its own line (no blank lines): `iface ↓N↑N/s [linkspeed]`; wireless when present: `wlan0 ↓N↑N/s ▂▄▆█ -NNdBm` (bars per [Wireless signal bars](#wireless-signal-bars); padding per [Mode-specific rendering](#mode-specific-rendering)); SSID line (ascii/sixel): `<icon:🛜> <name> N.N/N.NG` / `<icon:🛜> <name> NN/NNM` — text mode: `SSID <name> ...`; then address lines in fixed order: IPv4, IPv6 (local), WAN (public), WAN6 (public). Each line is shown only when its address is non-empty. Text mode labels: `IP`/`IP6`/`WAN`/`WAN6`; ascii/sixel icons: 📡/📡/🌍/🌍. When a local IP matches its WAN counterpart, its label/icon changes and the redundant WAN/WAN6 line is omitted, per [Overlapping IP/WAN](#mode-specific-rendering). | Throughput per [Network throughput thresholds](#network-throughput-thresholds). Wireless rate per [Wireless link rate](#wireless-link-rate). Link speed per [Wired link speed](#wired-link-speed). Arrow: ↓ rx, ↑ tx. |
 | `WEATHER` | *(none)* | *(none)* | `[icon/desc] +NN°C [+NN°C..+NN°C]`; while pending: `-` (dash). In `--once` mode the main loop blocks up to 3s awaiting weather; if the deadline expires or the fetch fails, a dash is shown. |
 | `CAL` | `Month YYYY` | *(none)* | `   Month YYYY` (3-space indent on the month line only), then day header row, then day grid. The first day is padded with `w*3` spaces to align it below its weekday header column — this is valid positional alignment, not extra indentation. Today's date is highlighted with reverse video (`\033[7m`) in ascii/panel modes when stdout is a TTY; no escape sequences emitted on pipe. |
 
@@ -577,8 +573,8 @@ the non-linearity of lithium‑ion discharge curves near 0% and 100%.
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `bat_samples_chg[10]` | `struct bat_sample` | Charging samples, FIFO, indexed by `bat_idx_chg` |
-| `bat_samples_dchg[10]` | `struct bat_sample` | Discharging samples, FIFO, indexed by `bat_idx_dchg` |
+| `bat_samples_chg[10]` | `struct bat_sample` | Charging samples, FIFO, indexed by `bat_idx_chg`. Each sample has `power_diff` (µAh), `duration_sec`, and `biased` (int: 1 = biased, 0 = unbiased). |
+| `bat_samples_dchg[10]` | `struct bat_sample` | Discharging samples, FIFO, indexed by `bat_idx_dchg`. Same structure. |
 | `bat_idx_chg` | `int` | Current slot index for charging (−1 when no active slot) |
 | `bat_idx_dchg` | `int` | Current slot index for discharging (−1 when no active slot) |
 | `bat_charge_count` | `int` | Number of valid samples in charge array (0–10) |
@@ -588,6 +584,10 @@ the non-linearity of lithium‑ion discharge curves near 0% and 100%.
 | `bat_prev_state` | `int` | Previous tick's `bat_tstate`; used to detect transitions to state 2 |
 | `bat_change_ts` | `time_t` | `time(0)` wall-clock value, dual-purpose: (a) state-entry timestamp — set when state switches to discharging or charging; (b) slot-rollover timestamp — updated when a 60-second sample is closed. Used for `duration_sec` computation in both cases. Rollover never fires on a state-transition tick (transition runs first, clearing slots before rollover logic executes). |
 | `bat_charge_full_raw` | `int` | Full charge capacity (µAh) — re-read on Full/Not-charging when `bat_pct != 100` |
+| `bat_biased_next_chg` | `int` | 1 if the next charging sample created should be marked biased, 0 otherwise |
+| `bat_biased_next_dchg` | `int` | 1 if the next discharging sample created should be marked biased, 0 otherwise |
+| `bat_unbiased_full_chg` | `int` | 1 when enough unbiased charging time has been accumulated (flag to skip further biased charging samples) |
+| `bat_unbiased_full_dchg` | `int` | 1 when enough unbiased discharging time has been accumulated (flag to skip further biased discharging samples) |
 
 #### State machine
 
@@ -601,11 +601,11 @@ the non-linearity of lithium‑ion discharge curves near 0% and 100%.
    - `state 1` = Charging.
    - `state 2` = Full / Not charging / Unknown → no sampling possible.
 
-2. **State transition detection** — on ANY state change between 0, 1, or 2, the in-flight sample for the direction being left (if one exists) is finalized at the transition moment. Previously completed samples are kept and remain available for future estimates.
+2. **State transition detection** — on ANY state change between 0, 1, or 2, the in-flight sample for the direction being left (if one exists) is finalized at the transition moment. The finalization runs the same consolidation logic as a rollover (step 3b below) for consistency. Previously completed samples are kept and remain available for future estimates.
 
-   - If the previous state was discharging (0) or charging (1): finalize its in-flight sample if one exists (`bat_idx_dchg ≥ 0` or `bat_idx_chg ≥ 0`). Finalizing records `duration_sec = (int)(now - bat_change_ts)` on the final slot — `power_diff` is already correct from the last incremental update. If no open slot exists (no power change occurred during the period), no slot is created or advanced.
+   - If the previous state was discharging (0) or charging (1): finalize its in-flight sample if one exists (`bat_idx_dchg ≥ 0` or `bat_idx_chg ≥ 0`). Finalizing records `duration_sec = (int)(now - bat_change_ts)` on the final slot — `power_diff` is already correct from the last incremental update. Apply the **unbiased consolidation** logic (see below). If no open slot exists (no power change occurred during the period), no slot is created or advanced.
    - If the previous state was 2 (full/not-charging): nothing to finalize.
-   - If the new state is discharging (0) or charging (1): reset baselines (`bat_change_ts = now`, `bat_last_raw = cur_raw`), and set the new direction's index to -1.
+   - If the new state is discharging (0) or charging (1): reset baselines (`bat_change_ts = now`, `bat_last_raw = cur_raw`), set the new direction's index to -1, and set `bat_biased_next_* = 1` for the new direction. If the old direction's `bat_unbiased_full_*` was 1, it remains 1 — future biased samples in that direction are still skipped when the direction is re-entered.
    - If the new state is 2 (full/not-charging): recalibrate `bat_charge_full_raw` if `bat_pct != 100` (only on the transition tick — subsequent consecutive ticks in state 2 skip the re-read via `bat_prev_state == 2` guard).
 
    After handling the transition, update `bat_prev_state = bat_tstate`, then `bat_tstate = state`. Consecutive ticks within the same state only execute step 3 below — the transition block is not re-entered.
@@ -616,12 +616,29 @@ the non-linearity of lithium‑ion discharge curves near 0% and 100%.
       - If `per_tick_delta == 0`: skip slot storage entirely this tick. No updates to samples, no slot advancement.
 
    b. If `per_tick_delta != 0`:
-      - If the index for this direction is `−1` (no active slot), advance to the next free slot (wrapping FIFO at 10, evicting oldest). Initialize the new slot's `power_diff = 0`. If advancing beyond `count`, increment count (capped at 10).
+
+      - **Biased flag**: the first sample created after entering a direction is marked biased (`bat_biased_next_* == 1`). Subsequent samples in the same direction (created on rollover, when `idx == -1` and a new slot is allocated) are marked unbiased (`bat_biased_next_* == 0`). Multiple biased samples for the same direction can exist if state changes back and forth faster than the tick interval, each entry resetting `bat_biased_next_* = 1`.
+
+      - If the index for this direction is `−1` (no active slot):
+        - If the new slot would be **biased** (`bat_biased_next_* == 1`) AND `bat_unbiased_full_* == 1`: skip slot creation entirely for this tick. Do not create or advance any slot. Proceed to step 3c.
+        - Otherwise: advance to the next free slot (wrapping FIFO at 10, evicting oldest). Initialize the new slot's `power_diff = 0`, `biased = bat_biased_next_*` (1 or 0), then set `bat_biased_next_* = 0`. If advancing beyond `count`, increment count (capped at 10).
+
       - Accumulate into the active slot:
         - `power_diff += per_tick_delta` — running total of raw change since slot creation.
         - `duration_sec = (int)(now - bat_change_ts)` — time since last state entry or rollover.
-      - If `duration_sec ≥ 60`, close the active slot (values already stored this tick) and set `idx = -1`. Update `bat_change_ts = now` and `bat_last_raw = cur_raw`. The next tick with `per_tick_delta != 0` will allocate a fresh slot starting at `power_diff = 0`, `duration_sec = 0`.
+
+      - If `duration_sec ≥ 60`, close the active slot (values already stored this tick) and set `idx = -1`. Apply **unbiased consolidation** (see below). Update `bat_change_ts = now` and `bat_last_raw = cur_raw`. The next tick with `per_tick_delta != 0` will allocate a fresh slot starting at `power_diff = 0`, `duration_sec = 0`.
+
       - If `duration_sec < 60`, leave the slot open. Future ticks with non-zero `per_tick_delta` will accumulate onto the same `power_diff` and refresh `duration_sec`.
+
+      - **Unbiased consolidation** (runs when a slot is finalized, both at rollover and at state-transition finalization, but only if `bat_unbiased_full_*` is not already 1):
+        - If the finalized slot is biased: store it normally, no further action.
+        - If the finalized slot is unbiased:
+          1. Compute `total_unbiased_dur = slot.duration_sec + sum(duration_sec of all previously stored unbiased samples in this direction)`.
+          2. If `total_unbiased_dur ≥ 60`:
+             - Set `bat_unbiased_full_* = 1`.
+             - Remove (prune) all biased samples from this direction's FIFO. Only unbiased samples remain.
+             - Any future biased slot creation for this direction is skipped (the `bat_unbiased_full_* == 1` check above).
 
    c. Always set `bat_last_raw = cur_raw` at the end of the tick regardless of whether storage occurred.
 
@@ -665,13 +682,14 @@ Default: week starts on Monday. With `--sunday-start`, week starts on Sunday (Su
 | Field | Text mode | ASCII mode | Sixel mode |
 |-------|-----------|------------|------------|
 | Clock | `HH:MM:SS` plain text | Unicode block chars (▀▄█) scaled | Sixel bitmapped clock digits |
-| Widget labels | Plain text labels (`CPU`, `MEM`, `GPU`, `FAN`, `UP`, `STO`, `BAT`, `SSID`, `IP`, `IP6`, `WAN`, `WAN6`, `VRAM`) | Unicode icons per [Widget rendering details](#widget-rendering-details) — text labels removed | Same as ASCII |
+| Widget labels | Plain text labels (`CPU`, `MEM`, `GPU`, `FAN`, `UP`, `STO`, `BAT`, `SSID`, `IP`, `IP6`, `WIP`, `WIP6`, `WAN`, `WAN6`, `VRAM`) | Unicode icons per [Widget rendering details](#widget-rendering-details) — text labels removed | Same as ASCII |
 | Battery | `BAT NN% charging/discharging/full` (time estimate appended when samples exist: `BAT NN% ↓ 2h 15m discharging`) | `<icon> NN%` — icon before percentage, no `BAT` label, no text suffix. Time estimate appended after percentage: `<icon> NN% ↓ 2h 15m` | Same as ASCII |
 | FAN temps | No prefix (`NN°C NN°C ...`) | 🌡️ prefix added before temp line | Same as ASCII |
 | VRAM label | `VRAM` | 🎞️ (`U+1F39E` + VS16) | Same as ASCII |
 | SSID label | `SSID` | 🛜 (`U+1F6DC`) | Same as ASCII |
 | IP/IP6 labels | `IP`, `IP6` | 📡 (`U+1F4E1`) — same icon for both; IPv4 and IPv6 format patterns are visibly different, no distinct icon needed | Same as ASCII |
 | WAN/WAN6 labels | `WAN`, `WAN6` | 🌍 (`U+1F30D`) — text mode shows `WAN <addr>`, ascii/sixel shows globe icon before address | Same as ASCII |
+| Overlapping IP/WAN | When local IP matches WAN, text mode label changes from `IP`/`IP6` to `WIP`/`WIP6`. Ascii/sixel mode replaces 📡 with 🌍. The redundant WAN/WAN6 line is omitted (the relabeled IP line already carries the WAN address). Line order preserved: IPv4 always first, then IPv6, then WAN, then WAN6 — each omitted when empty. Independent per address family. | Same as text (icon swap, no label text) | Same as ASCII |
 | Wireless strength | Bars per [Wireless signal bars](#wireless-signal-bars) — fixed 1-space padding, no dynamic `wifi_pad` | Bars per [Wireless signal bars](#wireless-signal-bars) — dynamic `wifi_pad` spacing 1–7 | Same as ASCII |
 | NIC icon | *(none — SSID on its own line)* | *(none — SSID on its own line)* | Same |
 | Weather | short description + temperature [+max..+min]; `-` while pending (continuous) | Unicode icon + temperature [+max..+min]; `-` while pending (continuous) | Same as ASCII |
@@ -760,11 +778,14 @@ All reads are from `/proc` and `/sys` — no external binaries.
   next poll iteration, and fresh DNS resolution starts immediately. This
   ensures the displayed WAN IP always reflects the current network attachment,
   even during flapping.
-- **Public IP deduplication**: WAN (public IPv4) is compared against
+- **Public IP overlap detection**: WAN (public IPv4) is compared against
   local IPv4. WAN6 (public IPv6) is compared against local IPv6. If a
-  public IP matches its local counterpart, the line is omitted — the
-  address is local, not routed. IPv4 and IPv6 comparisons are independent;
-  a mismatch on one family does not affect the other.
+  public IP matches its local counterpart, the local IP line changes its
+  prefix/label to indicate the overlap. When they match, the redundant
+  WAN/WAN6 line is omitted — the IP line already bears the WAN address.
+  Line order is always: IPv4, IPv6, WAN, WAN6 (each omitted when empty).
+  IPv4 and IPv6 comparisons are independent; a mismatch on one family
+  does not affect the other.
 - **Link cache** (`r->links[]`): per-tick storage for interface metadata
   and throughput counters. Each entry:
 
@@ -1235,12 +1256,16 @@ Example layout:
         If changed from the initial size (read at step 1), emit RIS and recompute
         layout. In `--once` mode this step is skipped — the single frame uses the
         initial layout read at startup.
-      g. Render clock + sidebar in the selected mode. If sidebar is empty, clock uses
-         full terminal width. In continuous mode the clock is vertically centered via
-         `position_cursor(d->row)` and the sidebar is positioned at the top row (row 0).
-         In `--once` mode the clock renders inline at the cursor position (no CUP);
-          the sidebar is positioned at the clock's starting Y via relative cursor-up
-          `\033[%dA` (see [`--once` mode](#--once-mode-deviation-from-continuous)).
+       g. Render clock + sidebar in the selected mode. If sidebar is empty, clock uses
+          full terminal width. In continuous mode the clock is vertically centered via
+          `position_cursor(d->row)` and the sidebar is positioned at the top row (row 0).
+          In `--once` mode the clock renders inline at the cursor position (no CUP);
+           the sidebar is positioned at the clock's starting Y via relative cursor-up
+           `\033[%dA` (see [`--once` mode](#--once-mode-deviation-from-continuous)).
+           Sidebar lines are truncated to `wsrow` (continuous mode only) — any rows
+           beyond the terminal height are silently dropped. A terminal resize to a smaller
+           height causes the sidebar to shorten on the next tick; a resize to a larger
+           height reveals previously truncated lines.
      h. If `tls_terminated` is set, break out of the loop.
      i. If `--once`, break out of the loop.
      j. Compute sleep: `nanosleep(1s - ns_elapsed)`.
@@ -1288,25 +1313,28 @@ Example layout:
 
 Instead of steps 3d–3i above, `--once` mode does:
 
- 1. Start WAN v4, WAN v6, and weather DNS threads **in parallel** (only
-    for widgets in the active set). Each target has an independent lifecycle
-    — WAN v4 and WAN v6 are triggered at the same time but may resolve,
-    connect, and receive responses on different schedules. No I/O thread
-    yet — the first DNS to complete will create it.
- 2. Enter a **tight poll loop** for up to **3 seconds total**:
-    ```
-    deadline = now + 3s
-    while (now < deadline && !all_results_ready) {
-        check each http_result.state
-        remaining = deadline - now
-        if (remaining > 0 && !all_results_ready)
-            poll(NULL, 0, min(remaining_ms, 100))
-    }
-    ```
-    The I/O thread (if created) handles all socket I/O in the background.
-    Results are checked per-slot — each fetch is independent. The loop
-    exits early when all active fetches have completed (either success,
-    failure, or exhaustion).
+  1. Start WAN v4, WAN v6, and weather DNS threads **in parallel** (only
+     for widgets in the active set). WAN v4 and WAN v6 are always triggered
+     regardless of local IP presence. Each target has an independent lifecycle
+     — WAN v4 and WAN v6 are triggered at the same time but may resolve,
+     connect, and receive responses on different schedules. No I/O thread
+     yet — the first DNS to complete will create it.
+  2. Enter a **tight poll loop** for up to **3 seconds total**:
+     ```
+     deadline = now + 3s
+     while (now < deadline && !all_results_ready) {
+         check each http_result.state
+         remaining = deadline - now
+         if (remaining > 0 && !all_results_ready)
+             poll(NULL, 0, min(remaining_ms, 100))
+     }
+     ```
+     The I/O thread (if created) handles all socket I/O in the background.
+     Results are checked per-widget: weather readiness is independent; WAN
+     readiness waits for both v4 and v6 when both local IPs exist, or skips
+     a family when its local IP is absent. If neither family has a local IP,
+     the WAN check passes immediately. The loop exits early when all active
+     widgets are ready.
  3. Single `tick()` call renders once with whatever results are available.
        Inside `tick()`, local IP is refreshed via `refresh_local_ip_once`
        (calls `do_get_ip` for IPv4 and `get_local_ip6` for IPv6 directly,

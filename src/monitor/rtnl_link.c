@@ -103,7 +103,7 @@ static int link_cache_cb(const struct nlmsghdr *nh, void *arg)
 void rtnl_cache_links(struct rtnl_ctx *r)
 {
   r->link_count = 0;
-  rtnl_dump(r, RTM_GETLINK, AF_PACKET, link_cache_cb, r);
+  rtnl_dump(r, RTM_GETLINK, AF_UNSPEC, link_cache_cb, r);
   r->links_stale = 0;
   r->refreshed = 1;
 }

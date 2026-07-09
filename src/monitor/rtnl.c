@@ -27,6 +27,8 @@ int rtnl_open(struct rtnl_ctx *r)
   r->fd = sys_socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE);
   if (r->fd < 0)
     return -1;
+  int one = 1;
+  setsockopt(r->fd, SOL_NETLINK, NETLINK_GET_STRICT_CHK, &one, sizeof one);
   struct sockaddr_nl sa = {.nl_family = AF_NETLINK };
   if (sys_bind(r->fd, (struct sockaddr *)&sa, sizeof sa) < 0) {
     sys_close(r->fd);
@@ -73,17 +75,28 @@ static int nlk_recv_loop(const struct rtnl_ctx *r, rtnl_cb cb, void *arg)
   }
 }
 
-int rtnl_dump(struct rtnl_ctx *r, int type, int family, rtnl_cb cb, void *arg)
+static void rtnl_set_dump_hdr(struct nlmsghdr *nh, int type, int family)
 {
-  unsigned char req[CUP_BUF_SZ];
-  struct nlmsghdr *nh = (struct nlmsghdr *)req;
-  struct rtgenmsg *g = (struct rtgenmsg *)NLMSG_DATA(nh);
-  nh->nlmsg_len = sizeof(struct nlmsghdr) + sizeof(struct rtgenmsg);
   nh->nlmsg_type = (unsigned short)type;
   nh->nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
-  nh->nlmsg_seq = ++r->seq;
   nh->nlmsg_pid = 0;
-  g->rtgen_family = (unsigned char)family;
+  if (type == RTM_GETADDR) {
+    struct ifaddrmsg *ifa = (struct ifaddrmsg *)NLMSG_DATA(nh);
+    ifa->ifa_family = (unsigned char)family;
+    nh->nlmsg_len = sizeof(struct nlmsghdr) + sizeof(struct ifaddrmsg);
+  } else {
+    struct ifinfomsg *ifi = (struct ifinfomsg *)NLMSG_DATA(nh);
+    ifi->ifi_family = (unsigned char)family;
+    nh->nlmsg_len = sizeof(struct nlmsghdr) + sizeof(struct ifinfomsg);
+  }
+}
+
+int rtnl_dump(struct rtnl_ctx *r, int type, int family, rtnl_cb cb, void *arg)
+{
+  unsigned char req[CUP_BUF_SZ] = { 0 };
+  struct nlmsghdr *nh = (struct nlmsghdr *)req;
+  nh->nlmsg_seq = ++r->seq;
+  rtnl_set_dump_hdr(nh, type, family);
   if (nl_send_dump(r->fd, req, nh->nlmsg_len) < 0)
     return -1;
   return nlk_recv_loop(r, cb, arg);

@@ -15,9 +15,6 @@ enum mode { MODE_AUTO, MODE_TEXT, MODE_ASCII, MODE_SIXEL };
 struct args {
   enum mode mode;
   int once;
-  int all;
-  int gpu;
-  int fan;
   int sunday_start;
   int has_widgets;
   char widgets[PATH_SZ];

@@ -51,7 +51,8 @@ void emit_widget_panel(struct display *d, const struct clock_state *ci, int once
   int info_w = d->wscol > d->info_col ? d->wscol - d->info_col : 0;
   char col_buf[16];
   snprintf(col_buf, sizeof col_buf, "\033[%dG", d->info_col + 1);
-  int lines = render_wrapped(pbuf, info_w, d->is_tty, col_buf);
+  int max_lines = once ? 0 : d->wsrow;
+  int lines = render_wrapped(pbuf, info_w, d->is_tty, col_buf, max_lines);
   update_sidebar_lines(d, lines, once, d->is_tty, col_buf);
 }
 
@@ -91,7 +92,8 @@ void do_render(enum mode m, struct display *d, const struct tm *tm, const struct
   } else {
     render_ascii_mode(d, tm, ci, once);
   }
-  /* modes already end with \n; once needs no extra, continuous needs one \n to separate frames */
-  if (!once)
-    sys_write(STDOUT_FILENO, "\n", sizeof "\n" - 1);
+  if (!once) {
+    if (m == MODE_TEXT)
+      sys_write(STDOUT_FILENO, "\n", sizeof "\n" - 1);
+  }
 }

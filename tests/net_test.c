@@ -56,7 +56,7 @@ static int test_get_net_info_routed(void)
   struct clock_state ci;
   memset(&ci, 0, sizeof ci);
   ci.keep.net.wlan_dbm = -42;
-  widget_setup(&ci.keep.widget, 0, NULL, 1, 1);
+  widget_setup(&ci.keep.widget, 0, NULL);
   get_net_info(&ci);
 
   if (ci.keep.net.count != 1)
@@ -80,7 +80,7 @@ static int test_get_net_info_twice(void)
   struct clock_state ci;
   memset(&ci, 0, sizeof ci);
   ci.keep.net.wlan_dbm = -55;
-  widget_setup(&ci.keep.widget, 0, NULL, 1, 1);
+  widget_setup(&ci.keep.widget, 0, NULL);
   get_net_info(&ci);
   if (ci.net_dbm != -55)
     return 19;
@@ -310,7 +310,7 @@ static int test_get_net_info_drain_fifo(void)
   struct clock_state ci;
   memset(&ci, 0, sizeof ci);
   ci.keep.net.wlan_dbm = -42;
-  widget_setup(&ci.keep.widget, 0, NULL, 1, 1);
+  widget_setup(&ci.keep.widget, 0, NULL);
 
   struct mon_action items_buf[5];
   memset(items_buf, 0, sizeof items_buf);
@@ -398,11 +398,49 @@ static int test_net_line_bounds(void)
   struct clock_state ci;
   memset(&ci, 0, sizeof ci);
   ci.keep.net.wlan_dbm = -42;
-  widget_setup(&ci.keep.widget, 0, NULL, 1, 1);
+  widget_setup(&ci.keep.widget, 0, NULL);
   get_net_info(&ci);
   size_t len = strlen(ci.net_line);
   if (len >= sizeof ci.net_line)
     return 10;
+  return 0;
+}
+
+/* Regression: net_line null-terminated after shorter frame (no phantom lines).
+   First call establishes baseline, second writes longer data, third writes
+   shorter. Without `*p = 0` in fmt_net_line, leftover bytes from the longer
+   frame create phantom lines via extra \n boundaries. */
+static int test_net_line_null_term(void)
+{
+  mock_reset();
+  /* Two interfaces so wlan_idx can point to one and eth5 is wired */
+  setup_netlink_mocks(500000, 1000000);
+  mock_set_link_speed("eth5", 1000000);
+
+  struct clock_state ci;
+  memset(&ci, 0, sizeof ci);
+  ci.keep.net.wlan_dbm = -42;
+  ci.keep.net.wlan_idx = -1;
+  widget_setup(&ci.keep.widget, 0, NULL);
+  get_net_info(&ci);
+
+  /* Call 2: higher stats → throughput → longer throughput strings */
+  setup_netlink_mocks(700000, 2000000000ULL);
+  ci.keep.net.needs_route = 1;
+  get_net_info(&ci);
+
+  /* Call 3: same stats → zero throughput → shorter strings */
+  setup_netlink_mocks(700000, 2000000000ULL);
+  ci.keep.net.needs_route = 1;
+  get_net_info(&ci);
+
+  /* Count newlines — stale data creates extra \n boundaries */
+  int nl = 0;
+  for (const char *p = ci.net_line; *p; p++)
+    if (*p == '\n')
+      nl++;
+  if (nl > 1)
+    return 50 + nl;
   return 0;
 }
 
@@ -470,6 +508,9 @@ int main(void)
   if (rc)
     return rc;
   rc = test_net_line_bounds();
+  if (rc)
+    return rc;
+  rc = test_net_line_null_term();
   if (rc)
     return rc;
   return 0;

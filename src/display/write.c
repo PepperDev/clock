@@ -122,7 +122,6 @@ static void wl_fallback(const char *pos, int pos_n, const char *p, int clen, int
     sys_write(STDOUT_FILENO, sp, (size_t)n);
     pad -= n;
   }
-  sys_write(STDOUT_FILENO, "\n", 1);
 }
 
 static int write_one_line(const char *pos, int pos_n, const char *p, int clen, int pad)
@@ -131,7 +130,7 @@ static int write_one_line(const char *pos, int pos_n, const char *p, int clen, i
   int n = 0;
   memcpy(buf + n, pos, pos_n);
   n += pos_n;
-  if (n + clen + pad + 1 > (int)sizeof buf) {
+  if (n + clen + pad > (int)sizeof buf) {
     wl_fallback(pos, pos_n, p, clen, pad);
     return 1;
   }
@@ -139,51 +138,78 @@ static int write_one_line(const char *pos, int pos_n, const char *p, int clen, i
   n += clen;
   memset(buf + n, ' ', pad);
   n += pad;
-  buf[n] = '\n';
-  sys_write(STDOUT_FILENO, buf, n + 1);
+  sys_write(STDOUT_FILENO, buf, n);
   return 1;
 }
 
-static int write_wrapped_lines(const char *start, const char *end, int info_w, int tty, const char *col_str)
+struct wr_ctx {
+  int info_w;
+  int tty;
+  const char *col_str;
+  int max_lines;
+  int count;
+};
+
+static int wr_limit(const struct wr_ctx *ctx)
 {
-  char pos[CUP_BUF_SZ] = { 0 };
-  int pos_n = 0;
-  if (tty & TTY_CUP)
-    pos_n = snprintf(pos, sizeof pos, tty & TTY_EL ? "%s" ESC_EL : "%s", col_str);
-  const char *p = start;
-  int lines = 0;
-  while (p < end) {
-    const char *breakp = advance_cols(p, end, info_w);
-    int pad = tty == TTY_CUP ? info_w - col_width(p, breakp) : 0;
-    lines += write_one_line(pos, pos_n, p, (int)(breakp - p), pad);
-    p = breakp;
-  }
-  return lines;
+  return ctx->max_lines > 0 && ctx->count >= ctx->max_lines;
 }
 
-static int write_wrapped(const char *start, const char *end, int info_w, int tty, const char *col_str)
+static void wr_mkpos(const struct wr_ctx *ctx, char *pos, int *pos_n)
+{
+  *pos_n = 0;
+  if (ctx->tty & TTY_CUP)
+    *pos_n = snprintf(pos, CUP_BUF_SZ, ctx->tty & TTY_EL ? "%s" ESC_EL : "%s", ctx->col_str);
+}
+
+static void write_wrapped_lines(const char *start, const char *end, struct wr_ctx *ctx)
+{
+  char pos[CUP_BUF_SZ] = { 0 };
+  int pos_n;
+  wr_mkpos(ctx, pos, &pos_n);
+  const char *p = start;
+  while (p < end) {
+    if (wr_limit(ctx))
+      break;
+    if (ctx->count > 0)
+      sys_write(STDOUT_FILENO, "\n", 1);
+    ctx->count++;
+    const char *breakp = advance_cols(p, end, ctx->info_w);
+    int pad = ctx->tty == TTY_CUP ? ctx->info_w - col_width(p, breakp) : 0;
+    write_one_line(pos, pos_n, p, (int)(breakp - p), pad);
+    p = breakp;
+  }
+}
+
+static void write_wrapped(const char *start, const char *end, struct wr_ctx *ctx)
 {
   if (end - start >= (int)(sizeof(ESC_EL) - 1))
     start += sizeof(ESC_EL) - 1;
-  if (info_w < 1) {
+  if (ctx->info_w < 1) {
+    if (ctx->count > 0)
+      sys_write(STDOUT_FILENO, "\n", 1);
+    ctx->count++;
     sys_write(STDOUT_FILENO, start, end - start);
-    sys_write(STDOUT_FILENO, "\n", sizeof "\n" - 1);
-    return 1;
+    return;
   }
-  return write_wrapped_lines(start, end, info_w, tty, col_str);
+  write_wrapped_lines(start, end, ctx);
 }
 
-int render_wrapped(const char *panel, int info_w, int tty, const char *col_str)
+int render_wrapped(const char *panel, int info_w, int tty, const char *col_str, int max_lines)
 {
-  int lines = 0;
+  struct wr_ctx ctx = {.info_w = info_w,.tty = tty,.col_str = col_str,.max_lines = max_lines,.count = 0 };
   const char *p = panel;
-  while (p && *p) {
+  while (*p) {
+    if (wr_limit(&ctx))
+      break;
     const char *nl = strchr(p, '\n');
     const char *end = nl ? nl : p + strlen(p);
-    lines += write_wrapped(p, end, info_w, tty, col_str);
-    p = nl ? nl + 1 : NULL;
+    write_wrapped(p, end, &ctx);
+    if (!nl)
+      break;
+    p = nl + 1;
   }
-  return lines;
+  return ctx.count;
 }
 
 static void clr_el(int diff)

@@ -136,6 +136,9 @@ void cleanup_all(struct display *d, struct clock_state *c)
     sys_write(STDOUT_FILENO, ESC_ST, sizeof ESC_ST - 1);
   if (d->termios_valid)
     tcsetattr(STDIN_FILENO, TCSANOW, &d->saved_termios);
-  if (d->cursor_hidden)
-    sys_write(STDOUT_FILENO, ESC_SHOW_CURSOR, sizeof ESC_SHOW_CURSOR - 1);
+  if (!c->keep.text) {
+    sys_write(STDOUT_FILENO, "\n", 1);
+    if (d->cursor_hidden)
+      sys_write(STDOUT_FILENO, ESC_SHOW_CURSOR, sizeof ESC_SHOW_CURSOR - 1);
+  }
 }

@@ -44,7 +44,7 @@ static int test_once_pty(const char *clock_bin)
     ioctl(fd, TIOCSCTTY, NULL);
     dup2(fd, 0); dup2(fd, 1); dup2(fd, 2);
     if (fd > 2) close(fd);
-    execl(clock_bin, "clock", "-oa", "ascii", NULL);
+    execl(clock_bin, "clock", "-o", "ascii", NULL);
     _exit(99);
   }
 
@@ -107,7 +107,7 @@ static int test_abnormal_pty(const char *clock_bin)
     ioctl(fd, TIOCSCTTY, NULL);
     dup2(fd, 0); dup2(fd, 1); dup2(fd, 2);
     if (fd > 2) close(fd);
-    execl(clock_bin, "clock", "-a", "ascii", NULL);
+    execl(clock_bin, "clock", "ascii", NULL);
     _exit(99);
   }
 

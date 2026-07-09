@@ -527,6 +527,27 @@ static int test_cpu_delta(void)
   return 0;
 }
 
+static int test_battery_energy_now(void)
+{
+  mock_reset();
+  mock_glob("/sys/class/power_supply/*/type", (char *[]) {
+            (char *)"/sys/class/power_supply/ACAD/type",
+            (char *)"/sys/class/power_supply/BAT0/type"
+            }, 2);
+  mock_file("/sys/class/power_supply/ACAD/type", "Mains\n");
+  mock_file("/sys/class/power_supply/BAT0/type", "Battery\n");
+  mock_file("/sys/class/power_supply/BAT0/energy_now", "2500000\n");
+  mock_file("/sys/class/power_supply/BAT0/energy_full", "5000000\n");
+  mock_file("/sys/class/power_supply/BAT0/status", "Charging\n");
+  struct clock_state ci = { 0 };
+  test_get_cpu_info(&ci, 0);
+  if (ci.bat_pct != 50)
+    return 1;
+  if (ci.bat_charging != 1)
+    return 2;
+  return 0;
+}
+
 static int test_battery_charging(void)
 {
   mock_reset();
@@ -746,6 +767,81 @@ static int test_battery_est_state_tx(void)
   return 0;
 }
 
+static int test_bat_biased_first(void)
+{
+  mock_reset();
+  mock_glob("/sys/class/power_supply/*/type", (char *[]) { (char *)"/sys/class/power_supply/BAT0/type" }, 1);
+  mock_file("/sys/class/power_supply/BAT0/type", "Battery\n");
+  mock_file("/sys/class/power_supply/BAT0/charge_full", "5000000\n");
+  mock_file("/sys/class/power_supply/BAT0/status", "Discharging\n");
+  struct clock_state ci = { 0 };
+  mock_file("/sys/class/power_supply/BAT0/charge_now", "4250000\n");
+  test_get_cpu_info(&ci, 1000);
+  if (ci.keep.bat_biased_next_dchg != 1)
+    return 1;
+  mock_file("/sys/class/power_supply/BAT0/charge_now", "4240000\n");
+  test_get_cpu_info(&ci, 1030);
+  if (ci.keep.bat_discharge_count != 1)
+    return 2;
+  if (!ci.keep.bat_samples_dchg[0].biased)
+    return 3;
+  if (ci.keep.bat_biased_next_dchg != 0)
+    return 4;
+  return 0;
+}
+
+static int test_bat_biased_rolloff(void)
+{
+  mock_reset();
+  mock_glob("/sys/class/power_supply/*/type", (char *[]) { (char *)"/sys/class/power_supply/BAT0/type" }, 1);
+  mock_file("/sys/class/power_supply/BAT0/type", "Battery\n");
+  mock_file("/sys/class/power_supply/BAT0/charge_full", "5000000\n");
+  mock_file("/sys/class/power_supply/BAT0/status", "Discharging\n");
+  struct clock_state ci = { 0 };
+  mock_file("/sys/class/power_supply/BAT0/charge_now", "4250000\n");
+  test_get_cpu_info(&ci, 1000);
+  mock_file("/sys/class/power_supply/BAT0/charge_now", "4240000\n");
+  test_get_cpu_info(&ci, 1060);
+  if (ci.keep.bat_discharge_count != 1)
+    return 1;
+  if (!ci.keep.bat_samples_dchg[0].biased)
+    return 2;
+  mock_file("/sys/class/power_supply/BAT0/charge_now", "4230000\n");
+  test_get_cpu_info(&ci, 1120);
+  if (ci.keep.bat_discharge_count != 2)
+    return 3;
+  if (ci.keep.bat_samples_dchg[1].biased)
+    return 4;
+  return 0;
+}
+
+static int test_bat_consolidate(void)
+{
+  mock_reset();
+  mock_glob("/sys/class/power_supply/*/type", (char *[]) { (char *)"/sys/class/power_supply/BAT0/type" }, 1);
+  mock_file("/sys/class/power_supply/BAT0/type", "Battery\n");
+  mock_file("/sys/class/power_supply/BAT0/charge_full", "5000000\n");
+  mock_file("/sys/class/power_supply/BAT0/status", "Discharging\n");
+  struct clock_state ci = { 0 };
+  mock_file("/sys/class/power_supply/BAT0/charge_now", "4250000\n");
+  test_get_cpu_info(&ci, 1000);
+  mock_file("/sys/class/power_supply/BAT0/charge_now", "4240000\n");
+  test_get_cpu_info(&ci, 1060);
+  if (!ci.keep.bat_samples_dchg[0].biased)
+    return 1;
+  if (ci.keep.bat_unbiased_full_dchg)
+    return 2;
+  mock_file("/sys/class/power_supply/BAT0/charge_now", "4230000\n");
+  test_get_cpu_info(&ci, 1120);
+  if (!ci.keep.bat_unbiased_full_dchg)
+    return 3;
+  if (ci.keep.bat_samples_dchg[0].duration_sec != 0)
+    return 4;
+  if (ci.keep.bat_samples_dchg[1].biased)
+    return 5;
+  return 0;
+}
+
 static int test_empty_meminfo(void)
 {
   mock_reset();
@@ -868,7 +964,10 @@ static int test_storage_usage(void)
   mock_file("/proc/self/mountinfo",
             "19 27 0:4 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw\n"
             "27 1 259:3 / / rw,relatime - ext4 /dev/nvme0n1p2 rw\n"
-            "30 27 0:22 / /home rw,relatime - ext4 /dev/sda2 rw\n");
+            "30 27 0:22 / /home rw,relatime - ext4 /dev/sda2 rw\n"
+            "31 27 0:23 / /sys/fs/fuse/connections rw,relatime - fusectl fusectl rw\n"
+            "32 27 0:24 / /run/user/1000/ns rw,relatime - nsfs nsfs rw\n"
+            "33 27 0:25 / /proc/sys/fs/binfmt_misc rw,relatime - binfmt_misc binfmt_misc rw\n");
   {
     struct statvfs st = {.f_blocks = 2097152,.f_bfree = 1048576,.f_frsize = 4096 };
     mock_statvfs("/", &st);
@@ -1103,7 +1202,7 @@ static int test_ethtool_speed_gset(void)
   mock_set_link_speed("eth0", 0);
   mock_set_gset_speed("eth0", 1000);
   struct widget_ctx wctx;
-  widget_setup(&wctx, 0, NULL, 1, 1);
+  widget_setup(&wctx, 0, NULL);
   struct clock_state ci = { 0 };
   ci.keep.widget = wctx;
   get_net_info(&ci);
@@ -1123,7 +1222,7 @@ static int test_ethtool_speed_no_glinksettings(void)
   mock_set_gset_speed("eth0", 1000);
   mock_no_glinksettings = 1;
   struct widget_ctx wctx;
-  widget_setup(&wctx, 0, NULL, 1, 1);
+  widget_setup(&wctx, 0, NULL);
   struct clock_state ci = { 0 };
   ci.keep.widget = wctx;
   get_net_info(&ci);
@@ -1193,18 +1292,15 @@ static int test_wifi_align_text(void)
 static int test_widget_order(void)
 {
   WidgetType wset[WIDGET_COUNT];
-  int n = widget_default_order(wset, 0, 0);
-  if (n != 9)
-    return 1;
+  int n = widget_default_order(wset);
+  if (n != WIDGET_COUNT)
+    return 2;
   if (wset[0] != WIDGET_DATE)
     return 11;
   if (wset[1] != WIDGET_CPU)
     return 12;
   if (wset[2] != WIDGET_MEM)
     return 13;
-  n = widget_default_order(wset, 1, 1);
-  if (n != WIDGET_COUNT)
-    return 2;
   if (wset[3] != WIDGET_GPU)
     return 3;
   return 0;
@@ -1235,8 +1331,8 @@ static int test_widget_setup(void)
   widget_set_active(&wctx, wset, 0);
   if (widget_active(&wctx, WIDGET_CPU))
     return 6;
-  widget_setup(&wctx, 1, "NET", 0, 0);
-  widget_setup(&wctx, 0, NULL, 1, 1);
+  widget_setup(&wctx, 1, "NET");
+  widget_setup(&wctx, 0, NULL);
   return 0;
 }
 
@@ -1930,6 +2026,10 @@ static int test_once_3s_ok(void)
   ci.keep.async.wan4_result.state = 2;
   ci.keep.async.wan4_result.reason = 0;
   pthread_mutex_unlock(&ci.keep.async.wan4_result.lock);
+  pthread_mutex_lock(&ci.keep.async.wan6_result.lock);
+  ci.keep.async.wan6_result.state = HTTP_ERROR;
+  ci.keep.async.wan6_result.cancelled = 0;
+  pthread_mutex_unlock(&ci.keep.async.wan6_result.lock);
   unsigned long long t0 = (unsigned long long)time(0);
   once_wait(&ci, t0);
   unsigned long long dt = (unsigned long long)time(0) - t0;
@@ -1944,7 +2044,7 @@ static void test_get_cpu_info(struct clock_state *ci, time_t now)
 {
   ci->keep.widget = test_wctx;
   ci->keep.net.needs_route = 1;
-  get_cpu_info(ci, now);
+  gather_all(ci, now);
 }
 
 static int test_io_thread_run_normal(void)
@@ -2166,7 +2266,7 @@ static int test_cpu_temp_sentinel(void)
 
 int main(void)
 {
-  widget_setup(&test_wctx, 0, NULL, 1, 1);
+  widget_setup(&test_wctx, 0, NULL);
   static const struct {
     const char *name;
     int (*fn)(void);
@@ -2181,6 +2281,7 @@ int main(void)
     {"test_container_unlimited", test_container_unlimited, 120},
     {"test_cpu_delta", test_cpu_delta, 200},
     {"test_cpu_temp_sentinel", test_cpu_temp_sentinel, 0},
+    {"test_battery_energy_now", test_battery_energy_now, 250},
     {"test_battery_charging", test_battery_charging, 300},
     {"test_battery_full", test_battery_full, 400},
     {"test_battery_not_charging", test_battery_not_charging, 450},
@@ -2191,6 +2292,9 @@ int main(void)
     {"test_battery_est_flat", test_battery_est_flat, 530},
     {"test_battery_est_zero_power", test_battery_est_zero_power, 535},
     {"test_battery_est_state_tx", test_battery_est_state_tx, 540},
+    {"test_bat_biased_first", test_bat_biased_first, 545},
+    {"test_bat_biased_rolloff", test_bat_biased_rolloff, 550},
+    {"test_bat_consolidate", test_bat_consolidate, 555},
     {"test_empty_meminfo", test_empty_meminfo, 600},
     {"test_partial_meminfo", test_partial_meminfo, 700},
     {"test_bad_proc_files", test_bad_proc_files, 800},

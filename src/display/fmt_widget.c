@@ -10,6 +10,9 @@
 
 enum { BAT_EST_SZ = 24 };
 
+static const char *L_IP[] = { "IP", "WIP" };
+static const char *L_IP6[] = { "IP6", "WIP6" };
+
 static int zcat(int n, int sz, int r)
 {
   int rem = sz - n;
@@ -58,10 +61,20 @@ static int wan_check(int st, const char *pub, const char *loc)
   return !st && pub[0] && strcmp(pub, loc);
 }
 
+static const char *ip_tag(const char *icon, const char *wan_tag, const char *local,
+                          const char *pub, const char *labels[2])
+{
+  if (local[0] && pub[0] && !strcmp(local, pub))
+    return wan_tag ? wan_tag : labels[1];
+  return icon ? icon : labels[0];
+}
+
 static int ip_line(char *b, int z, const char *p, const char *icon, const struct clock_state *c)
 {
-  const char *t4 = icon ? icon : "IP";
-  const char *t6 = icon ? icon : "IP6";
+  const struct cpu_keep *k = &c->keep;
+  const char *wan_tag = !c->keep.text ? "\xf0\x9f\x8c\x8d" : NULL;
+  const char *t4 = ip_tag(icon, wan_tag, c->local_ip, k->pub_ip4, L_IP);
+  const char *t6 = ip_tag(icon, wan_tag, c->local_ip6, k->pub_ip6, L_IP6);
   int n = fmt_one_ip(b, z, p, t4, c->local_ip);
   return zcat(n, z, fmt_one_ip(b + n, z - n, p, t6, c->local_ip6));
 }

@@ -43,13 +43,15 @@ static unsigned long long tick(enum mode m, int once, struct display *d, struct 
 {
   struct tm tm_buf;
   const struct tm *tm = tick_time(now, &tm_buf);
-  get_cpu_info(ci, now);
-  if (!once && m != MODE_TEXT)
-    check_resize(d, &ci->keep.widget);
-  setup_widget_data(ci, tm, m == MODE_TEXT, d->sunday_start, d->is_tty);
-  poll_async_fetches(ci, now);
+  if (!once) {
+    gather_all(ci, now);
+    poll_async_fetches(ci, now);
+    if (m != MODE_TEXT)
+      check_resize(d, &ci->keep.widget);
+  }
   if (widget_active(&ci->keep.widget, WIDGET_WEATHER))
     restore_weather(ci);
+  setup_widget_data(ci, tm, m == MODE_TEXT, d->sunday_start, d->is_tty);
   render_and_wait(m, once, d, tm, ci);
   return once ? 0ULL : wait_next_tick();
 }
@@ -57,8 +59,10 @@ static unsigned long long tick(enum mode m, int once, struct display *d, struct 
 static void clock_loop(enum mode m, int once, struct display *d, struct clock_state *c, unsigned long long t0)
 {
   unsigned long long now = t0;
-  if (once)
-    once_wait(c, t0);
+  if (once) {
+    gather_all(c, (time_t) now);
+    once_wait(c, now);
+  }
   do {
     now = tick(m, once, d, c, now);
     if (tls_terminated)
