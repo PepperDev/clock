@@ -11,20 +11,89 @@
 static const struct {
   const char *s;
   int len;
-} VFS_SKIP[] = {
+} VFS_SEED[] = {
   {"proc", 4}, {"sysfs", 5}, {"tmpfs", 5}, {"devtmpfs", 8}, {"cgroup", 6},
-  {"debugfs", 7}, {"tracefs", 7}, {"pstore", 6}, {"securityfs", 10}, {"hugetlbfs", 9},
-  {"configfs", 8}, {"efivarfs", 8}, {"bpf", 3}, {"autofs", 6}, {"overlay", 7},
-  {"squashfs", 8}, {"devpts", 6}, {"mqueue", 6}, {"fusectl", 7}, {"nsfs", 4},
-  {"binfmt_misc", 11}
+  {"cgroup2", 7}, {"debugfs", 7}, {"tracefs", 7}, {"pstore", 6},
+  {"securityfs", 10}, {"hugetlbfs", 9}, {"configfs", 8}, {"efivarfs", 8},
+  {"bpf", 3}, {"autofs", 6}, {"overlay", 7}, {"squashfs", 8}, {"devpts", 6},
+  {"mqueue", 6}, {"fusectl", 7}, {"nsfs", 4}, {"ramfs", 5}, {"binfmt_misc", 11},
+  {"nullfs", 7}, {"sockfs", 6}, {"pipefs", 7}, {"binder", 6}
 };
 
-static int skip_fstype(const char *fstype)
+static int vfs_has(const struct mount_ctx *mc, const char *fstype)
 {
-  for (size_t i = 0; i < sizeof VFS_SKIP / sizeof *VFS_SKIP; i++)
-    if (strncmp(fstype, VFS_SKIP[i].s, VFS_SKIP[i].len) == 0)
+  for (int i = 0; i < mc->vfs_n; i++)
+    if (strncmp(fstype, mc->vfs[i].name, mc->vfs[i].len) == 0)
       return 1;
   return 0;
+}
+
+static int vfs_grow(struct mount_ctx *mc)
+{
+  int cap = mc->vfs_cap;
+  int step = cap > 65536 ? 65536 : cap > 64 ? cap : 64;
+  int new_cap = cap + step;
+  struct vfs_entry *p = realloc(mc->vfs, (unsigned)new_cap * sizeof(*p));
+  if (!p)
+    return -1;
+  mc->vfs = p;
+  mc->vfs_cap = new_cap;
+  return 0;
+}
+
+static int vfs_add(struct mount_ctx *mc, const char *name, size_t len)
+{
+  if (mc->vfs_n >= mc->vfs_cap && vfs_grow(mc) != 0)
+    return -1;
+  char *dup = malloc(len + 1);
+  if (!dup)
+    return -1;
+  memcpy(dup, name, len);
+  dup[len] = 0;
+  mc->vfs[mc->vfs_n].name = dup;
+  mc->vfs[mc->vfs_n].len = len;
+  mc->vfs_n++;
+  return 0;
+}
+
+static int fs_line(void *ctx, const char *line, int len)
+{
+  struct mount_ctx *mc = ctx;
+  if (len < 7 || memcmp(line, "nodev\t", 6) != 0)
+    return 0;
+  const char *name = line + 6;
+  size_t nlen = (size_t)len - 6;
+  if (!vfs_has(mc, name))
+    return vfs_add(mc, name, nlen) < 0 ? 1 : 0;
+  return 0;
+}
+
+void vfs_skip_init(struct mount_ctx *mc)
+{
+  mc->vfs = NULL;
+  mc->vfs_n = 0;
+  mc->vfs_cap = 0;
+  for (size_t i = 0; i < sizeof VFS_SEED / sizeof *VFS_SEED; i++)
+    vfs_add(mc, VFS_SEED[i].s, (size_t)VFS_SEED[i].len);
+  char b[512];
+  file_read_lines("/proc/filesystems", mc, fs_line, b, sizeof b);
+  if (mc->vfs_n < mc->vfs_cap) {
+    struct vfs_entry *p = realloc(mc->vfs, (unsigned)mc->vfs_n * sizeof(*p));
+    if (p) {
+      mc->vfs = p;
+      mc->vfs_cap = mc->vfs_n;
+    }
+  }
+}
+
+void vfs_skip_free(struct mount_ctx *mc)
+{
+  for (int i = 0; i < mc->vfs_n; i++)
+    free(mc->vfs[i].name);
+  free(mc->vfs);
+  mc->vfs = NULL;
+  mc->vfs_n = 0;
+  mc->vfs_cap = 0;
 }
 
 static void build_scan_fmt(char *fmt, size_t fmt_sz, size_t field_sz)
@@ -49,7 +118,7 @@ static int scan_mntpt(const char *line, struct mount *m, int *pos)
   return sscanf(line, fmt, &m->mnt_id, &m->maj, &m->min, m->mntpt, pos);
 }
 
-static int parse_mnt(const char *line, struct mount *m)
+static int parse_mnt(const char *line, struct mount *m, const struct mount_ctx *mc)
 {
   const char *dash = strstr(line, " - ");
   if (!dash)
@@ -57,7 +126,7 @@ static int parse_mnt(const char *line, struct mount *m)
   char fstype[FSTYPE_SZ] = "";
   if (scan_fstype(dash + 3, fstype, sizeof fstype) != 1)
     return 0;
-  if (skip_fstype(fstype))
+  if (vfs_has(mc, fstype))
     return 0;
   int pos = 0;
   if (scan_mntpt(line, m, &pos) < 4)
@@ -107,24 +176,28 @@ int mount_for_dev(const struct disk_ctx *d, unsigned idx, unsigned maj, unsigned
   return maj == d->devs[idx].major && min >= dm && min < dm + 16;
 }
 
-static int fmt_line(char *b, int z, const struct mount *m, const char *sfx, unsigned long long d)
+static int fmt_mount(char *b, int z, const struct mount *m)
 {
   unsigned long long total = m->total;
   unsigned long long used = total - m->free;
   int pc = total ? (int)(used * 100 / total) : 0;
-  return snprintf(b, z, "  %s %d%% %.1f/%.1f%s\n", m->mntpt, pc, (double)used / d, (double)total / d, sfx);
+  if (total <= DISPLAY_UNIT_THRESHOLD)
+    return snprintf(b, z, " %s %d%% %llu/%lluM\n", m->mntpt, pc, used, total);
+  if (total / BYTES_PER_KB_F <= DISPLAY_UNIT_THRESHOLD)
+    return snprintf(b, z, " %s %d%% %.1f/%.1fG\n", m->mntpt, pc, (double)used / BYTES_PER_KB_F,
+                    (double)total / BYTES_PER_KB_F);
+  return snprintf(b, z, " %s %d%% %.1f/%.1fT\n", m->mntpt, pc, (double)used / BYTES_PER_MB_F,
+                  (double)total / BYTES_PER_MB_F);
 }
 
-int mount_fmt(char *b, int z, const struct mount *m)
+int mount_fmt(char *b, int z, const struct mount *m, const char *ico)
 {
-  unsigned long long total = m->total;
-  unsigned long long used = total - m->free;
-  int pc = total ? (int)(used * 100 / total) : 0;
-  if (m->total <= DISPLAY_UNIT_THRESHOLD)
-    return snprintf(b, z, "  %s %d%% %llu/%lluM\n", m->mntpt, pc, used, total);
-  if (m->total / BYTES_PER_KB_F <= DISPLAY_UNIT_THRESHOLD)
-    return fmt_line(b, z, m, "G", BYTES_PER_KB_F);
-  return fmt_line(b, z, m, "T", BYTES_PER_MB_F);
+  int n = snprintf(b, z, "%s", ico);
+  if (n >= z) {
+    char tmp[1];
+    return n + fmt_mount(tmp, 0, m);
+  }
+  return n + fmt_mount(b + n, z - n, m);
 }
 
 static int mnt_stat(const char *pt, struct mount *m)
@@ -171,7 +244,7 @@ static int mnt_line(void *ctx, const char *line, int len)
 {
   struct mnt_ctx *mc = ctx;
   struct mount tmp;
-  if (len < 1 || !parse_mnt(line, &tmp))
+  if (len < 1 || !parse_mnt(line, &tmp, mc->mc))
     return 0;
   if (has_dup_majmin(mc->mc, tmp.maj, tmp.min, tmp.mnt_id))
     return 0;

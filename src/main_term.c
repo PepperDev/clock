@@ -12,6 +12,7 @@
 #include "display/sixel.h"
 #include "monitor/monitor.h"
 #include "monitor/monitor_int.h"
+#include "monitor/mount.h"
 #include "monitor/ioserv.h"
 #include "util/syscall.h"
 
@@ -111,19 +112,33 @@ static void cleanup_io(struct async_ctx *ctx)
   io_wait_stopped(&ctx->ioc);
 }
 
+static void cleanup_disk(struct disk_ctx *d)
+{
+  if (!d->mnt)
+    return;
+  vfs_skip_free(d->mnt);
+  free(d->mnt);
+  d->mnt = NULL;
+}
+
+static void cleanup_net(struct async_ctx *ctx, struct cpu_keep *k)
+{
+  dns_cancel(&ctx->wan4_dns);
+  dns_cancel(&ctx->wan6_dns);
+  rtnl_monitor_stop(&k->rtnl_mon);
+  sys_close(k->net.dgram_fd);
+  sys_close(k->rtnl.fd);
+  sys_close(k->nlk.fd);
+  free(k->net.wcache.ifindices);
+  free(k->net.wcache.ssids);
+}
+
 static void cleanup_fds(struct clock_state *c)
 {
   struct async_ctx *ctx = &c->keep.async;
-  if (ctx->widget_mask & (1u << WIDGET_NET)) {
-    dns_cancel(&ctx->wan4_dns);
-    dns_cancel(&ctx->wan6_dns);
-    rtnl_monitor_stop(&c->keep.rtnl_mon);
-    sys_close(c->keep.net.dgram_fd);
-    sys_close(c->keep.rtnl.fd);
-    sys_close(c->keep.nlk.fd);
-    free(c->keep.net.wcache.ifindices);
-    free(c->keep.net.wcache.ssids);
-  }
+  cleanup_disk(&c->keep.disk);
+  if (ctx->widget_mask & (1u << WIDGET_NET))
+    cleanup_net(ctx, &c->keep);
   if (ctx->widget_mask & (1u << WIDGET_WEATHER))
     dns_cancel(&ctx->weather_dns);
 }

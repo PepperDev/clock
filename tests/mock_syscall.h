@@ -21,5 +21,8 @@ void mock_set_gset_speed(const char *iface, int speed);
 extern int mock_no_glinksettings;
 extern int mock_pthread_create_fail;
 extern int mock_syscall_real_threads;
+extern int mock_sys_open_count;
+extern int mock_sys_socket_type;
+extern int mock_sys_close_fd;
 
 #endif

@@ -186,16 +186,23 @@ static void fmt_into(char **pp, size_t rem, const char *fmt, ...)
   }
 }
 
+static const char WIRED_ICON[] = "\xf0\x9f\x8c\x90 ";
+static const char WIRELESS_ICON[] = "\xf0\x9f\x93\xb6 ";
+
+static const char *iface_name(const struct clock_state *ci, unsigned idx)
+{
+  const char *n = name_idx_by_idx((struct rtnl_ctx *)&ci->keep.rtnl, idx);
+  return n ? n : "";
+}
+
 static void fmt_iface_line(const struct clock_state *ci, int i, unsigned long long rx, unsigned long long tx, char **pp)
 {
   char r[RATE_SZ], t[RATE_SZ], s[SPEED_LN_SZ] = "";
   net_fmt_thr(r, sizeof r, rx);
   net_fmt_thr(t, sizeof t, tx);
   iface_speed_str(ci, i, s, sizeof s);
-  const char *name = name_idx_by_idx((struct rtnl_ctx *)&ci->keep.rtnl, (unsigned)ci->keep.net.ifindex[i]);
-  if (!name)
-    name = "";
-  fmt_into(pp, net_line_rem(ci, pp), "%s \xe2\x86\x93%s\xe2\x86\x91%s%s", name, r, t, s);
+  fmt_into(pp, net_line_rem(ci, pp), "%s%s \xe2\x86\x93%s\xe2\x86\x91%s%s",
+           ci->keep.text ? "" : WIRED_ICON, iface_name(ci, (unsigned)ci->keep.net.ifindex[i]), r, t, s);
 }
 
 static const char *fmt_bars(int dbm)
@@ -246,8 +253,9 @@ static void fmt_line(const struct clock_state *ci, const char *r, const char *t,
   fmt_net_ssid(ssid_part, sizeof ssid_part, ci);
   const char *b = fmt_bars(ci->net_dbm);
   const char *name = wlan_name(ci);
-  fmt_into(pp, net_line_rem(ci, pp), "%s \xe2\x86\x93%s\xe2\x86\x91%s%*s%s%ddBm\n%s",
-           name, r, t, pad, "", b, ci->net_dbm, ssid_part);
+  const char *icon = ci->keep.text ? "" : WIRELESS_ICON;
+  fmt_into(pp, net_line_rem(ci, pp), "%s%s \xe2\x86\x93%s\xe2\x86\x91%s%*s%s%ddBm\n%s",
+           icon, name, r, t, pad, "", b, ci->net_dbm, ssid_part);
 }
 
 static void fmt_wlan_line(const struct clock_state *ci, const char *r, const char *t, const int lens[2], char **pp)
@@ -298,7 +306,10 @@ static void query_station_rate(struct clock_state *ci)
   const char *w = name_idx_by_idx(&ci->keep.rtnl, (unsigned)n->ifindex[n->wlan_idx]);
   if (!w)
     return;
-  nlk_station_rate(&ci->keep.nlk, w, &ci->keep.net.wlan_rx_rate, &ci->keep.net.wlan_tx_rate, &ci->keep.net.wlan_dbm);
+  if (nlk_station_rate(&ci->keep.nlk, w, &ci->keep.net) < 0) {
+    nlk_scan_bss(&ci->keep.nlk, w, &ci->keep.net);
+    nlk_station_rate(&ci->keep.nlk, w, &ci->keep.net);
+  }
 }
 
 void do_wlan(struct clock_state *ci)

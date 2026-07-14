@@ -34,24 +34,24 @@ validate_fetch_output()
   fi
 
   [ $cur -le "$lines" ] || { fail "$label: missing IP line"; return; }
-  echo "$out" | sed -n "${cur}p" | grep -qE '^IP [0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' \
+  echo "$out" | sed -n "${cur}p" | grep -qE '^(IP|WIP) [0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' \
     || { fail "$label: line $cur not a valid IP line"; return; }
   cur=$((cur + 1))
 
   [ $cur -le "$lines" ] || { fail "$label: missing WAN line"; return; }
   nxt=$(echo "$out" | sed -n "${cur}p")
-  if echo "$nxt" | grep -qE '^IP6 '; then
+  if echo "$nxt" | grep -qE '^(IP6|WIP6) '; then
     cur=$((cur + 1))
   fi
 
   [ $cur -le "$lines" ] || { fail "$label: missing WAN line"; return; }
   nxt=$(echo "$out" | sed -n "${cur}p")
-  if echo "$nxt" | grep -qE '^WAN6 '; then
+  if echo "$nxt" | grep -qE '^(WAN6|WIP6) '; then
     cur=$((cur + 1))
   fi
 
   [ $cur -le "$lines" ] || { fail "$label: missing WAN line"; return; }
-  echo "$out" | sed -n "${cur}p" | grep -qE '^WAN [0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' \
+  echo "$out" | sed -n "${cur}p" | grep -qE '^(WAN|WIP) [0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' \
     || { fail "$label: line $cur not a valid WAN line"; return; }
   cur=$((cur + 1))
 

@@ -401,9 +401,9 @@ def check_sidebar_y(label, data, exp_y_start, clock_h=None):
 def run_test(label, once, pty, rows, cols, widgets, timeout=5, start_line=10, mode='ascii'):
     wscol = cols if cols else 80
     wsrow = rows if rows else 24
-    args = (['-o'] if once else []) + (['-w', '', mode] if not widgets else ['-a', mode])
+    args = (['-o'] if once else []) + (['-w', '', mode] if not widgets else [mode])
     prefix = ' -o' if once else ''
-    wflag = " -w ''" if not widgets else ' -a'
+    wflag = " -w ''" if not widgets else ''
     say(f"  {label}: clock{prefix}{wflag} {mode}" + (f", pty {rows}x{cols}" if pty else ", no pty"))
 
     if pty:

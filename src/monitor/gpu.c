@@ -72,6 +72,12 @@ struct probe_entry {
   unsigned int flag;
 };
 
+static const struct probe_entry PROBE_TBL[] = {
+  {"/device/mem_info_vis_vram_total", GPU_HAS_MEM},
+  {"/device/power_dpm_force_performance_level", GPU_HAS_GOV},
+  {"/power/rc6_residency_ms", GPU_HAS_RC6},
+};
+
 static unsigned int gpu_probe_hwmon(const struct gpu_ctx *gpu)
 {
   if (!gpu->hwmon_path[0])
@@ -96,14 +102,9 @@ static unsigned int gpu_probe_features(const struct gpu_ctx *gpu)
     if (gpu_has_file(gpu, "/device/pp_dpm_mclk"))
       p |= GPU_HAS_PP_MCLK;
   }
-  static const struct probe_entry TBL[] = {
-    {"/device/mem_info_vis_vram_total", GPU_HAS_MEM},
-    {"/device/power_dpm_force_performance_level", GPU_HAS_GOV},
-    {"/power/rc6_residency_ms", GPU_HAS_RC6},
-  };
-  for (size_t i = 0; i < sizeof TBL / sizeof TBL[0]; i++)
-    if (gpu_has_file(gpu, TBL[i].suffix))
-      p |= TBL[i].flag;
+  for (size_t i = 0; i < sizeof PROBE_TBL / sizeof PROBE_TBL[0]; i++)
+    if (gpu_has_file(gpu, PROBE_TBL[i].suffix))
+      p |= PROBE_TBL[i].flag;
   return p | gpu_probe_hwmon(gpu);
 }
 
@@ -118,9 +119,9 @@ static int read_gpu_uint(const struct gpu_ctx *gpu, const char *suffix, ull *v)
 static ull gpu_read_temp(const struct gpu_ctx *gpu)
 {
   if (!(gpu->present & GPU_HAS_TEMP))
-    return 0;
+    return (ull) - 1;
   int t = temp_from_milli(gpu->temp_path);
-  return t < 0 ? 0ULL : (ull) t;
+  return t < 0 ? (ull) - 1 : (ull) t;
 }
 
 static int gpu_read_mem(struct clock_state *ci)
@@ -275,7 +276,7 @@ static void gpu_read_amd(struct gpu_ctx *g, struct gpu_vals *v, const struct tim
     read_amd_freq_pair(g, "/device/pp_dpm_mclk", &v->mf, &v->mfmax);
 }
 
-static void gpu_probe(struct gpu_ctx *g)
+void gpu_probe(struct gpu_ctx *g)
 {
   find_card(g);
   if (!g->card_path[0])
@@ -293,11 +294,8 @@ static void gpu_probe(struct gpu_ctx *g)
 void gpu_collect(struct clock_state *ci)
 {
   struct gpu_ctx *g = &ci->keep.gpu;
-  if (!g->present) {
-    gpu_probe(g);
-    if (!g->present)
-      return;
-  }
+  if (!g->present)
+    return;
   struct gpu_vals v = { 0 };
   if (g->present & GPU_HAS_GT_FREQ)
     gpu_read_intel(g, &v.pct, &v.freq, &v.freq_max, &ci->keep.realtime_ts);

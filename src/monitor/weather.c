@@ -42,7 +42,7 @@ static const struct emoji_entry EMOJI_MAP[] = {
   {113, W_E_SUNNY},
   {116, W_E_PCLOUDY},
   {119, W_E_CLOUDY}, {122, W_E_CLOUDY},
-  {143, W_E_FOG},
+  {143, W_E_FOG}, {248, W_E_FOG}, {260, W_E_FOG},
   {176, W_E_RAIN}, {263, W_E_RAIN}, {266, W_E_RAIN},
   {293, W_E_RAIN}, {296, W_E_RAIN}, {299, W_E_RAIN},
   {302, W_E_RAIN}, {305, W_E_RAIN}, {308, W_E_RAIN},
@@ -176,6 +176,7 @@ void try_refetch_weather(struct clock_state *ci, unsigned long long now)
   if (weather_ready(k, now) == 0)
     return;
   k->weather_refresh_ts = now;
+  io_cancel_all(&k->async.ioc, CANCEL_WEATHER);
   dns_cancel(&k->async.weather_dns);
   close_conn_fd(&k->weather_fd);
   http_result_cancel(&k->async.weather_result);

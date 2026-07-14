@@ -40,7 +40,7 @@ static char *gpu_render(struct clock_state *ci)
   const char *e = p + sizeof ci->gpu_line;
   p += snprintf(p, e - p, "%s %d%%", ci->keep.text ? "GPU" : "\xf0\x9f\x8e\xae", ci->gpu_pct);
   p += fmt_gpu_clock(p, e, ci->gpu_freq, ci->gpu_freq_max);
-  if (ci->gpu_temp)
+  if (ci->gpu_temp >= 0)
     p += snprintf(p, e - p, " %d\xc2\xb0" "C", ci->gpu_temp);
   return p;
 }

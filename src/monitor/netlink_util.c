@@ -177,7 +177,7 @@ int nlk_init(struct netlink_ctx *nlk)
 {
   nlk->family = -1;
   nlk->seq = 0;
-  nlk->fd = sys_socket(AF_NETLINK, SOCK_RAW, NETLINK_GENERIC);
+  nlk->fd = sys_socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_GENERIC);
   if (nlk->fd < 0)
     return -1;
   struct sockaddr_nl sa = {.nl_family = AF_NETLINK };

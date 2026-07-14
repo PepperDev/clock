@@ -5,6 +5,8 @@
 #include <limits.h>             // cppcheck-suppress missingIncludeSystem
 #include "disk_impl.h"
 
+static const char *VIRT_TBL[] = { "ram", "loop", "dm-", "zram", "md" };
+
 static int check_virt_symlink(const char *path)
 {
   char vp[PATH_SZ];
@@ -12,9 +14,8 @@ static int check_virt_symlink(const char *path)
   snprintf(vp, sizeof vp, "/sys/devices/virtual/block/%s", name);
   if (sys_access(vp, F_OK) == 0)
     return 1;
-  static const char *TBL[] = { "ram", "loop", "dm-", "zram", "md" };
-  for (size_t i = 0; i < sizeof TBL / sizeof *TBL; i++)
-    if (strncmp(name, TBL[i], strlen(TBL[i])) == 0)
+  for (size_t i = 0; i < sizeof VIRT_TBL / sizeof *VIRT_TBL; i++)
+    if (strncmp(name, VIRT_TBL[i], strlen(VIRT_TBL[i])) == 0)
       return 1;
   return 0;
 }
@@ -133,12 +134,9 @@ int discover_dev(struct disk_ctx *d, const char *path, unsigned *idx)
   return d->devs[*idx].is_virtual;
 }
 
-int dev_read_temp(struct clock_state *ci, struct disk_ctx *d, unsigned idx, const char *path)
+int dev_read_temp(struct disk_ctx *d, unsigned idx, const char *path)
 {
-  int t = -1;
   if (d->devs[idx].major)
-    t = read_hwmon_temp(d, path, idx);
-  if (t > ci->sto_temp)
-    ci->sto_temp = t;
-  return t;
+    return read_hwmon_temp(d, path, idx);
+  return -1;
 }

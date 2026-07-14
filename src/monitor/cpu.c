@@ -8,9 +8,6 @@
 #include "monitor.h"
 
 #define LOAD_INT_SCALE 65536.0
-#define CPU_NO_GOVERNOR (1u << 0)
-#define CPU_NO_FREQ     (1u << 1)
-#define CPU_NO_TEMP     (1u << 2)
 #define CPU_STAT_FIELDS 7
 #define CPU_STAT_FIELD_MIN 4
 #define CPU_IDLE_IDX 3
@@ -109,23 +106,16 @@ static int cpu_temp_discover(struct cpu_keep *keep)
 {
   glob_t g;
   if (sys_glob("/sys/bus/pci/drivers/k10temp/*/hwmon/hwmon*/temp1_input", 0, NULL, &g) != 0)
-    if (sys_glob("/sys/devices/platform/coretemp.0/hwmon/hwmon*/temp1_input", 0, NULL, &g) != 0) {
-      keep->cpu_flags |= CPU_NO_TEMP;
+    if (sys_glob("/sys/devices/platform/coretemp.0/hwmon/hwmon*/temp1_input", 0, NULL, &g) != 0)
       return -1;
-    }
   snprintf(keep->cpu_temp_path, sizeof keep->cpu_temp_path, "%s", g.gl_pathv[0]);
   sys_globfree(&g);
   return 0;
 }
 
-int cpu_temp_c(struct cpu_keep *keep)
+int cpu_temp_c(const struct cpu_keep *keep)
 {
-  int t = keep->cpu_temp_path[0] ? temp_from_milli(keep->cpu_temp_path) : -1;
-  if (t >= 0)
-    return t;
-  if (keep->cpu_flags & CPU_NO_TEMP)
-    return -1;
-  if (cpu_temp_discover(keep) != 0)
+  if (!keep->cpu_temp_path[0])
     return -1;
   return temp_from_milli(keep->cpu_temp_path);
 }
@@ -160,6 +150,12 @@ static void freq_discover_dirs(struct cpu_keep *k)
   sys_globfree(&g);
 }
 
+void cpu_discover(struct cpu_keep *k)
+{
+  cpu_temp_discover(k);
+  freq_discover_dirs(k);
+}
+
 static void add_cpu_freq(const char *dir, int *sum_cur, int *sum_max, int *n)
 {
   char fp[PATH_SZ];
@@ -176,11 +172,7 @@ static void add_cpu_freq(const char *dir, int *sum_cur, int *sum_max, int *n)
 
 void get_cpu_freqs(struct clock_state *ci)
 {
-  struct cpu_keep *k = &ci->keep;
-  if (!(k->cpu_flags & CPU_NO_FREQ) && k->cpu_freq_ndir == 0)
-    freq_discover_dirs(k);
-  if (k->cpu_freq_ndir == 0)
-    k->cpu_flags |= CPU_NO_FREQ;
+  const struct cpu_keep *k = &ci->keep;
   int sum_cur = 0, sum_max = 0, n = 0;
   for (unsigned i = 0; i < k->cpu_freq_ndir; i++)
     add_cpu_freq(k->cpu_freq_dirs[i], &sum_cur, &sum_max, &n);
@@ -196,13 +188,12 @@ void get_cpu_freqs(struct clock_state *ci)
 void get_cpu_extra(struct clock_state *ci)
 {
   struct cpu_keep *k = &ci->keep;
-  if (!(k->cpu_flags & CPU_NO_GOVERNOR)) {
+  if (k->cpu_freq_ndir > 0) {
     if (read_file("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", ci->governor, sizeof ci->governor) == 0) {
       size_t n = strlen(ci->governor);
       while (n > 0 && (ci->governor[n - 1] == '\n' || ci->governor[n - 1] == '\r'))
         ci->governor[--n] = 0;
-    } else
-      k->cpu_flags |= CPU_NO_GOVERNOR;
+    }
   }
   ci->load = (double)k->si.loads[0] / LOAD_INT_SCALE;
 }

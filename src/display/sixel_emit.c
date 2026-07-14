@@ -9,6 +9,7 @@
 #include "display/esc.h"
 #include "util/syscall.h"
 #include "monitor/monitor.h"
+#include "monitor/widget.h"
 
 enum { HDR_SZ = 64, OVERLAY_BUF = 1024, CUP_BUF = 16, SIXEL_BAND_H = 6 };
 #define ALL_SIXEL_BG 63
@@ -83,7 +84,10 @@ static void sixel_emit_overlay(struct display *d, const struct clock_state *ci, 
     overlay_non_tty(ci);
     return;
   }
-  emit_widget_panel(d, ci, once, dh);
+  int wc;
+  widget_get_active(&ci->keep.widget, &wc);
+  if (wc > 0)
+    emit_widget_panel(d, ci, once, dh);
 }
 
 static void sixel_cup(int row, int col)

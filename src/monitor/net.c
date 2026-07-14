@@ -13,6 +13,21 @@
 #include "monitor_int.h"
 #include "monitor.h"
 
+static const char *VTYPES[] = {
+  "tun", "tap", "veth", "bridge", "bond", "dummy",
+  "sit", "gre", "gretap", "vti", "vlan", "vxlan", "geneve"
+};
+
+int is_virtual_kind(const char *kind)
+{
+  if (!kind || !*kind)
+    return 0;
+  for (size_t k = 0; k < sizeof VTYPES / sizeof VTYPES[0]; k++)
+    if (strcmp(kind, VTYPES[k]) == 0)
+      return 1;
+  return 0;
+}
+
 int get_dgram_fd(struct net_ctx *n)
 {
   if (n->dgram_fd <= 0)
@@ -57,7 +72,7 @@ static void refresh_ssid(struct clock_state *ci)
   if (ci->keep.net.wlan_idx >= 0 && ci->keep.nlk.fd > 0) {
     const char *name = name_idx_by_idx(&ci->keep.rtnl, (unsigned)ci->keep.net.ifindex[ci->keep.net.wlan_idx]);
     if (name)
-      nlk_wlan_ssid(&ci->keep.nlk, name, ci->keep.net.wlan_ssid, sizeof ci->keep.net.wlan_ssid);
+      nlk_scan_bss(&ci->keep.nlk, name, &ci->keep.net);
   }
 }
 

@@ -12,7 +12,7 @@ struct fmt_ctx {
 };
 
 // cppcheck-suppress staticFunction - used by tests
-int fmt_thr(char *b, int z, unsigned long long v)
+int sto_fmt_thr(char *b, int z, unsigned long long v)
 {
   if (v <= DISPLAY_UNIT_THRESHOLD)
     return snprintf(b, z, "%llub", v);
@@ -36,8 +36,8 @@ static int fmt_size(char *b, int z, unsigned long long bytes)
 static int fmt_dev(char *b, int z, const struct fmt_ctx *fc)
 {
   char rbuf[THR_STR_SZ], wbuf[THR_STR_SZ], sb[THR_STR_SZ] = "";
-  fmt_thr(rbuf, sizeof rbuf, fc->rb);
-  fmt_thr(wbuf, sizeof wbuf, fc->wb);
+  sto_fmt_thr(rbuf, sizeof rbuf, fc->rb);
+  sto_fmt_thr(wbuf, sizeof wbuf, fc->wb);
   if (fc->size)
     sb[0] = ' ', fmt_size(sb + 1, sizeof sb - 1, fc->size);
   if (fc->temp > 0)
@@ -61,14 +61,24 @@ static void safe_advance(char **pp, int cap, int n)
   }
 }
 
+static const char *mount_ico(const struct clock_state *ci)
+{
+  return ci->keep.text ? "" : "\xf0\x9f\x93\x81";
+}
+
+static int mount_matches_dev(const struct clock_state *ci, unsigned idx, const struct mount *m)
+{
+  return !m->consumed && (!ci->keep.disk.devs[idx].major || mount_for_dev(&ci->keep.disk, idx, m->maj, m->min));
+}
+
 static void add_dev_mounts(char **pp, const struct clock_state *ci, unsigned idx, struct mount *mnts, int nm)
 {
+  const char *ico = mount_ico(ci);
   for (int j = 0; j < nm; j++) {
-    if (mnts[j].consumed
-        || (ci->keep.disk.devs[idx].major && !mount_for_dev(&ci->keep.disk, idx, mnts[j].maj, mnts[j].min)))
+    if (!mount_matches_dev(ci, idx, &mnts[j]))
       continue;
     int cap = line_avail(ci, *pp);
-    int nf = mount_fmt(*pp, cap, &mnts[j]);
+    int nf = mount_fmt(*pp, cap, &mnts[j], ico);
     if (nf > 0) {
       safe_advance(pp, cap, nf);
       mnts[j].consumed = 1;
@@ -104,7 +114,7 @@ static void proc_one_dev(struct clock_state *ci, const char *path, struct mount 
   unsigned long long rs, ws;
   if (read_diskstat(path, &rs, &ws) != 0)
     return;
-  int temp = dev_read_temp(ci, &ci->keep.disk, idx, path);
+  int temp = dev_read_temp(&ci->keep.disk, idx, path);
   const char *icon = ci->keep.text ? "STO" : "\xf0\x9f\x97\x84\xef\xb8\x8f";
   struct dev_info di = { strrchr(path, '/') + 1, icon, temp, rs, ws, mnts, nm };
   fmt_thr_dev(pp, ci, idx, &di);
@@ -134,10 +144,11 @@ static void mark_consumed_mounts(struct disk_ctx *d, const glob_t *g, struct mou
 
 static void output_unmatched_and_reset(const struct clock_state *ci, struct mount *mnts, int nm, char **pp)
 {
+  const char *ico = mount_ico(ci);
   for (int j = 0; j < nm; j++) {
     if (!mnts[j].consumed) {
       int cap = line_avail(ci, *pp);
-      safe_advance(pp, cap, mount_fmt(*pp, cap, &mnts[j]));
+      safe_advance(pp, cap, mount_fmt(*pp, cap, &mnts[j], ico));
     }
   }
   for (int j = 0; j < nm; j++)
@@ -146,7 +157,6 @@ static void output_unmatched_and_reset(const struct clock_state *ci, struct moun
 
 static void scan_block_devs(struct clock_state *ci, const glob_t *g, struct mount *mnts, int nm)
 {
-  ci->sto_temp = -1;
   mark_consumed_mounts(&ci->keep.disk, g, mnts, nm);
   char *p = ci->sto_line;
   output_unmatched_and_reset(ci, mnts, nm, &p);
@@ -177,22 +187,23 @@ static void evict_missing_devs(struct disk_ctx *d, const glob_t *g)
 
 static void no_block_devs(struct clock_state *ci, struct mount_ctx *mc)
 {
+  const char *ico = mount_ico(ci);
   char *p = ci->sto_line;
   for (int j = 0; j < mc->nm; j++) {
     int cap = line_avail(ci, p);
-    safe_advance(&p, cap, mount_fmt(p, cap, &mc->mnts[j]));
+    safe_advance(&p, cap, mount_fmt(p, cap, &mc->mnts[j], ico));
   }
 }
 
 void sto_read_throughput(struct clock_state *ci)
 {
   ci->sto_line[0] = 0;
-  ci->sto_temp = -1;
   struct mount_ctx *mc = ci->keep.disk.mnt;
   if (!mc) {
     mc = calloc(1, sizeof *mc);
     if (!mc)
       return;
+    vfs_skip_init(mc);
     ci->keep.disk.mnt = mc;
   }
   mount_read(mc);

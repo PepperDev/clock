@@ -64,27 +64,26 @@ static int cgroup_mem_pair(const char *usage, const char *limit, unsigned long l
 #define MEM_NO_CGROUP_V2 (1u << 0)
 #define MEM_NO_CGROUP_V1 (1u << 1)
 
-static int try_cg(struct clock_state *ci, const char *usage, const char *limit, unsigned flag)
+void mem_discover(struct cpu_keep *k)
 {
-  if (ci->keep.mem_flags & flag)
-    return -1;
-  if (sys_access(usage, F_OK) != 0) {
-    ci->keep.mem_flags |= flag;
-    return -1;
-  }
-  int ret = cgroup_mem_pair(usage, limit, &ci->ctr_used_kb, &ci->ctr_max_kb);
-  if (ret < 0)
-    ci->keep.mem_flags |= flag;
-  return ret;
+  if (sys_access("/sys/fs/cgroup/memory.current", F_OK) == 0)
+    return;
+  k->mem_flags |= MEM_NO_CGROUP_V2;
+  if (sys_access("/sys/fs/cgroup/memory/memory.usage_in_bytes", F_OK) == 0)
+    return;
+  k->mem_flags |= MEM_NO_CGROUP_V1;
 }
 
 void get_container_mem(struct clock_state *ci)
 {
-  int ret = try_cg(ci, "/sys/fs/cgroup/memory.current",
-                   "/sys/fs/cgroup/memory.max", MEM_NO_CGROUP_V2);
-  if (ret < 0)
-    ret = try_cg(ci, "/sys/fs/cgroup/memory/memory.usage_in_bytes",
-                 "/sys/fs/cgroup/memory/memory.limit_in_bytes", MEM_NO_CGROUP_V1);
+  const struct cpu_keep *k = &ci->keep;
+  int ret = -1;
+  if (!(k->mem_flags & MEM_NO_CGROUP_V2))
+    ret = cgroup_mem_pair("/sys/fs/cgroup/memory.current",
+                          "/sys/fs/cgroup/memory.max", &ci->ctr_used_kb, &ci->ctr_max_kb);
+  if (ret < 0 && !(k->mem_flags & MEM_NO_CGROUP_V1))
+    ret = cgroup_mem_pair("/sys/fs/cgroup/memory/memory.usage_in_bytes",
+                          "/sys/fs/cgroup/memory/memory.limit_in_bytes", &ci->ctr_used_kb, &ci->ctr_max_kb);
   if (ret == 0) {
     ci->ctr_max_kb = ci->mem_total_kb;
     ret = 1;

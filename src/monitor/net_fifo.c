@@ -7,20 +7,6 @@
 #include "monitor_int.h"
 #include "monitor.h"
 
-static int is_virtual_kind(const char *kind)
-{
-  static const char *VTYPES[] = {
-    "tun", "tap", "veth", "bridge", "bond", "dummy",
-    "sit", "gre", "gretap", "vti", "vlan", "vxlan", "geneve"
-  };
-  if (!kind || !kind[0])
-    return 0;
-  for (size_t k = 0; k < sizeof VTYPES / sizeof VTYPES[0]; k++)
-    if (strcmp(kind, VTYPES[k]) == 0)
-      return 1;
-  return 0;
-}
-
 static int in_links(const struct rtnl_ctx *r, int ifindex)
 {
   for (int i = 0; i < r->link_count; i++)

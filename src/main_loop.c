@@ -82,6 +82,8 @@ int clock_main(int argc, char **argv)
   struct clock_state c = { 0 };
   struct display d = {.sunday_start = a.sunday_start };
   unsigned long long t0 = (unsigned long long)time(NULL);
-  clock_loop(setup_tty_and_mode(&a, &c, &d, t0), a.once, &d, &c, t0);
+  enum mode m = setup_tty_and_mode(&a, &c, &d, t0);
+  discover_hardware(&c);
+  clock_loop(m, a.once, &d, &c, t0);
   return EXIT_SUCCESS;
 }

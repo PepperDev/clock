@@ -148,8 +148,8 @@ void mock_add_nl_resp(const void *resp, size_t len)
 int sys_socket(int domain, int type, int protocol)
 {
   (void)domain;
-  (void)type;
   (void)protocol;
+  mock_sys_socket_type = type;
   return mock_nl_fd;
 }
 
@@ -324,6 +324,9 @@ int sys_access(const char *path, int mode)
 
 int mock_pthread_create_fail;
 int mock_syscall_real_threads;
+int mock_sys_open_count;
+int mock_sys_socket_type;
+int mock_sys_close_fd;
 
 /* Sentinel for fake thread handles — must be writable and large enough
    that pthread_cancel/pthread_detach don't crash when accessing fields
@@ -365,11 +368,15 @@ void mock_reset(void)
   mock_no_glinksettings = 0;
   mock_pthread_create_fail = 0;
   mock_syscall_real_threads = 0;
+  mock_sys_open_count = 0;
+  mock_sys_socket_type = 0;
+  mock_sys_close_fd = -1;
 }
 
 int sys_open(const char *path, int flags, ...)
 {
   (void)flags;
+  mock_sys_open_count++;
   int idx = -1;
   for (int i = 0; i < mock_file_count; i++) {
     if (strcmp(mock_files[i].path, path) == 0)
@@ -411,7 +418,7 @@ ssize_t sys_write(int fd, const void *buf, size_t count)
 
 int sys_close(int fd)
 {
-  (void)fd;
+  mock_sys_close_fd = fd;
   return 0;
 }
 

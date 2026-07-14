@@ -16,6 +16,11 @@ static const char *NAMES[WIDGET_COUNT] = {
   [WIDGET_CAL] = "CAL",
 };
 
+static const WidgetType DEFAULT_ORDER[] = {
+  WIDGET_DATE, WIDGET_CPU, WIDGET_MEM, WIDGET_GPU, WIDGET_FAN,
+  WIDGET_BAT, WIDGET_UP, WIDGET_STO, WIDGET_NET, WIDGET_WEATHER, WIDGET_CAL
+};
+
 static WidgetType name_to_type(const char *s, int len)
 {
   enum { WIDGET_NAME_SZ = 16 };
@@ -70,13 +75,9 @@ int widget_validate(const char *str)
 // cppcheck-suppress staticFunction -- exposed for unit testing via widget.h
 int widget_default_order(WidgetType *out)
 {
-  static const WidgetType BASE[] = {
-    WIDGET_DATE, WIDGET_CPU, WIDGET_MEM, WIDGET_GPU, WIDGET_FAN,
-    WIDGET_BAT, WIDGET_UP, WIDGET_STO, WIDGET_NET, WIDGET_WEATHER, WIDGET_CAL
-  };
   int n = 0;
   for (int i = 0; i < WIDGET_COUNT; i++)
-    out[n++] = BASE[i];
+    out[n++] = DEFAULT_ORDER[i];
   return n;
 }
 

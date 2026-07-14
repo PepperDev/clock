@@ -3,6 +3,7 @@
 #include "monitor/monitor.h"
 #include "monitor/monitor_int.h"
 #include "monitor/disk_impl.h"
+#include "monitor/mount.h"
 #include "monitor/widget.h"
 #include "util/syscall.h"
 #include <stdio.h>              // cppcheck-suppress missingIncludeSystem -- musl include paths not known
@@ -38,7 +39,7 @@ static unsigned char link_buf2[384];
 static unsigned char genl_resp[64];
 static unsigned char ssid_buf[128];
 static unsigned char stresp_buf[256];
-static unsigned char sts_resp[256];
+static unsigned char scan_buf[512];
 
 static void test_get_cpu_info(struct clock_state *ci, time_t now);
 
@@ -102,6 +103,35 @@ static void mk_sta_resp(int dbm)
   *(signed char *)((char *)sg + NLA_HDRLEN) = (signed char)dbm;
   si->nla_len = (unsigned short)(NLA_HDRLEN + (size_t)((char *)(sg + 1) - (char *)si));
   rnh->nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN + NLA_ALIGN(si->nla_len));
+}
+
+/* Build a GET_SCAN dump response with NL80211_ATTR_BSS containing BSSID + SSID IE */
+static void mk_scan_resp(const unsigned char *bssid, const char *ssid)
+{
+  mkgenl(28, NL80211_CMD_GET_SCAN);
+  rnh->nlmsg_flags = NLM_F_MULTI;
+  unsigned char *p = (unsigned char *)rgh + GENL_HDRLEN;
+  /* NL80211_ATTR_BSS */
+  struct nlattr *bss = (struct nlattr *)p;
+  bss->nla_type = NL80211_ATTR_BSS;
+  unsigned char *bp = p + NLA_HDRLEN;
+  /* NL80211_BSS_BSSID */
+  struct nlattr *bid = (struct nlattr *)bp;
+  bid->nla_type = NL80211_BSS_BSSID;
+  bid->nla_len = NLA_HDRLEN + 6;
+  memcpy(bp + NLA_HDRLEN, bssid, 6);
+  bp += NLA_ALIGN(bid->nla_len);
+  /* NL80211_BSS_INFORMATION_ELEMENTS with SSID tag 0x00 */
+  struct nlattr *ie = (struct nlattr *)bp;
+  ie->nla_type = NL80211_BSS_INFORMATION_ELEMENTS;
+  size_t slen = strlen(ssid);
+  ie->nla_len = (unsigned short)(NLA_HDRLEN + 2 + slen);
+  bp += NLA_HDRLEN;
+  bp[0] = 0;
+  bp[1] = (unsigned char)slen;
+  memcpy(bp + 2, ssid, slen);
+  bss->nla_len = (unsigned short)(NLA_HDRLEN + NLA_ALIGN(bid->nla_len) + NLA_ALIGN(ie->nla_len));
+  rnh->nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN + NLA_ALIGN(bss->nla_len));
 }
 
 static void mk_wlan_dump_resp(const char *name, const char *ssid, int ifindex)
@@ -209,15 +239,19 @@ static void setup_netlink_full(unsigned long long rx_eth, unsigned long long tx_
   mk_done_nl(done_buf);
   mock_add_nl_resp(done_buf, sizeof(struct nlmsghdr));
 
-  /* Station rate: first non-dump talk, then dump talk_dump */
-  mk_sta_resp(dbm);
-  memcpy(sts_resp, genbuf, rnh->nlmsg_len);
-  mock_add_nl_resp(sts_resp, rnh->nlmsg_len);
-  mk_sta_resp(dbm);
-  memcpy(stresp_buf, genbuf, rnh->nlmsg_len);
-  mock_add_nl_resp(stresp_buf, rnh->nlmsg_len);
+  /* nlk_scan_bss → GET_SCAN dump response (NLM_F_MULTI) + DONE */
+  static const unsigned char fake_bssid[] = { 0x10, 0x20, 0x30, 0x40, 0x50, 0x60 };
+  mk_scan_resp(fake_bssid, "MyWiFi");
+  memcpy(scan_buf, genbuf, rnh->nlmsg_len);
+  mock_add_nl_resp(scan_buf, rnh->nlmsg_len);
   mk_done_nl(done_buf);
   mock_add_nl_resp(done_buf, sizeof(struct nlmsghdr));
+
+  /* nlk_station_rate → targeted GET_STATION response (no NLM_F_MULTI, no DONE) */
+  mk_sta_resp(dbm);
+  rnh->nlmsg_flags = 0;
+  memcpy(stresp_buf, genbuf, rnh->nlmsg_len);
+  mock_add_nl_resp(stresp_buf, rnh->nlmsg_len);
 }
 
 static void setup_normal_mocks(void)
@@ -470,8 +504,6 @@ static int check_miss_fields2(const struct clock_state *ci)
     return 11;
   if (ci->has_ctr)
     return 12;
-  if (ci->sto_temp != -1)
-    return 13;
   return 0;
 }
 
@@ -978,8 +1010,6 @@ static int test_storage_usage(void)
   }
   struct clock_state ci = { 0 };
   test_get_cpu_info(&ci, 0);
-  if (ci.sto_temp != 45)
-    return 1;
   if (strstr(ci.sto_line, "/") == NULL)
     return 2;
   if (strstr(ci.sto_line, "50%") == NULL)
@@ -1071,10 +1101,10 @@ static int test_storage_dedup_bind(void)
   return 0;
 }
 
-static int test_fmt_thr_kb_fractional(void)
+static int test_sto_fmt_thr_kb_fractional(void)
 {
   char b[16];
-  int n = fmt_thr(b, sizeof b, 1537);
+  int n = sto_fmt_thr(b, sizeof b, 1537);
   if (n <= 0)
     return 1;
   if (strcmp(b, "1.5K") != 0)
@@ -1082,10 +1112,10 @@ static int test_fmt_thr_kb_fractional(void)
   return 0;
 }
 
-static int test_fmt_thr_kb_integer(void)
+static int test_sto_fmt_thr_kb_integer(void)
 {
   char b[16];
-  int n = fmt_thr(b, sizeof b, 2048);
+  int n = sto_fmt_thr(b, sizeof b, 2048);
   if (n <= 0)
     return 1;
   if (strcmp(b, "2.0K") != 0)
@@ -1093,10 +1123,10 @@ static int test_fmt_thr_kb_integer(void)
   return 0;
 }
 
-static int test_fmt_thr_bytes(void)
+static int test_sto_fmt_thr_bytes(void)
 {
   char b[16];
-  int n = fmt_thr(b, sizeof b, 1536);
+  int n = sto_fmt_thr(b, sizeof b, 1536);
   if (n <= 0)
     return 1;
   if (strcmp(b, "1536b") != 0)
@@ -1104,10 +1134,10 @@ static int test_fmt_thr_bytes(void)
   return 0;
 }
 
-static int test_fmt_thr_zero(void)
+static int test_sto_fmt_thr_zero(void)
 {
   char b[16];
-  int n = fmt_thr(b, sizeof b, 0);
+  int n = sto_fmt_thr(b, sizeof b, 0);
   if (n <= 0)
     return 1;
   if (strcmp(b, "0b") != 0)
@@ -1115,10 +1145,10 @@ static int test_fmt_thr_zero(void)
   return 0;
 }
 
-static int test_fmt_thr_kb_max(void)
+static int test_sto_fmt_thr_kb_max(void)
 {
   char b[16];
-  int n = fmt_thr(b, sizeof b, 1572864);
+  int n = sto_fmt_thr(b, sizeof b, 1572864);
   if (n <= 0)
     return 1;
   if (strcmp(b, "1536.0K") != 0)
@@ -1126,10 +1156,10 @@ static int test_fmt_thr_kb_max(void)
   return 0;
 }
 
-static int test_fmt_thr_mb_integer(void)
+static int test_sto_fmt_thr_mb_integer(void)
 {
   char b[16];
-  int n = fmt_thr(b, sizeof b, 2097152);
+  int n = sto_fmt_thr(b, sizeof b, 2097152);
   if (n <= 0)
     return 1;
   if (strcmp(b, "2.0M") != 0)
@@ -1137,10 +1167,10 @@ static int test_fmt_thr_mb_integer(void)
   return 0;
 }
 
-static int test_fmt_thr_mb_fractional(void)
+static int test_sto_fmt_thr_mb_fractional(void)
 {
   char b[16];
-  int n = fmt_thr(b, sizeof b, 1572865);
+  int n = sto_fmt_thr(b, sizeof b, 1572865);
   if (n <= 0)
     return 1;
   if (strcmp(b, "1.5M") != 0)
@@ -1170,6 +1200,61 @@ static int test_sto_line_bounds(void)
     return 1;
   if (ci.sto_line[sizeof ci.sto_line - 1] != '\0')
     return 2;
+  return 0;
+}
+
+static int test_mount_fmt_icon(void)
+{
+  struct mount m = { 0 };
+  m.total = 2048ULL * 1024;
+  m.free = 1024ULL * 1024;
+  snprintf(m.mntpt, sizeof m.mntpt, "/data");
+  char buf[128];
+  int n = mount_fmt(buf, sizeof buf, &m, "\xf0\x9f\x93\x81");
+  if (n <= 0)
+    return 1;
+  if (strstr(buf, "\xf0\x9f\x93\x81") == NULL)
+    return 2;
+  if (strstr(buf, "/data") == NULL)
+    return 3;
+  if (strstr(buf, "50%") == NULL)
+    return 4;
+  n = mount_fmt(buf, sizeof buf, &m, "");
+  if (n <= 0)
+    return 5;
+  if (buf[0] != ' ')
+    return 6;
+  return 0;
+}
+
+static int test_vfs_skip_init(void)
+{
+  mock_reset();
+  mock_file("/proc/filesystems",
+            "nodev\tproc\nnodev\tsysfs\nnodev\ttmpfs\next4\n" "nodev\tcustom_vfs\nnodev\tanother\n");
+  struct mount_ctx mc = { 0 };
+  vfs_skip_init(&mc);
+  if (mc.vfs_n < 29)
+    return 1;
+  if (mc.vfs_n != mc.vfs_cap)
+    return 2;
+  vfs_skip_free(&mc);
+  return 0;
+}
+
+static int test_vfs_skip_free(void)
+{
+  mock_reset();
+  mock_file("/proc/filesystems", "nodev\tproc\n");
+  struct mount_ctx mc = { 0 };
+  vfs_skip_init(&mc);
+  vfs_skip_free(&mc);
+  if (mc.vfs_n != 0)
+    return 1;
+  if (mc.vfs != NULL)
+    return 2;
+  if (mc.vfs_cap != 0)
+    return 3;
   return 0;
 }
 
@@ -1816,6 +1901,49 @@ static int test_wan_dns_cancel_race(void)
   return (s == 0 || s == -1) ? 0 : 1;
 }
 
+/* --- Regression tests for strace-derived bugs --- */
+
+/* Bug 1: cpu_temp_c must not call sys_open when cpu_temp_path is empty */
+static int test_cpu_temp_empty_path_no_open(void)
+{
+  struct cpu_keep keep = { 0 };
+  keep.cpu_temp_path[0] = 0;
+  mock_reset();
+  int r = cpu_temp_c(&keep);
+  if (r != -1)
+    return 1;
+  if (mock_sys_open_count != 0)
+    return 2;
+  return 0;
+}
+
+/* Bug 2: nlk_init must create socket with SOCK_CLOEXEC */
+static int test_nlk_init_socket_cloexec(void)
+{
+  struct netlink_ctx nlk = { 0 };
+  mock_reset();
+  mock_set_netlink(10, NULL, 0, NULL, 0);
+  nlk_init(&nlk);
+  if (!(mock_sys_socket_type & 02000000))       /* SOCK_CLOEXEC = 02000000 octal */
+    return 1;
+  sys_close(nlk.fd);
+  return 0;
+}
+
+/* Bug 3: mon_destroy_ctx must close fd=0 (not skip it) */
+static int test_mon_destroy_closes_fd_zero(void)
+{
+  struct rtnl_mon_ctx m = { 0 };
+  m.fd = 0;
+  m.started = 0;
+  pthread_mutex_init(&m.fifo.lock, NULL);
+  mock_reset();
+  rtnl_monitor_stop(&m);
+  if (mock_sys_close_fd != 0)
+    return 1;
+  return 0;
+}
+
 /* --- ioserv tests --- */
 
 static int http_result_read(struct http_result *slot, char *out, int maxlen)
@@ -2044,6 +2172,7 @@ static void test_get_cpu_info(struct clock_state *ci, time_t now)
 {
   ci->keep.widget = test_wctx;
   ci->keep.net.needs_route = 1;
+  discover_hardware(ci);
   gather_all(ci, now);
 }
 
@@ -2305,14 +2434,15 @@ int main(void)
     {"test_storage_usage", test_storage_usage, 1100},
     {"test_storage_dedup", test_storage_dedup, 1200},
     {"test_storage_dedup_bind", test_storage_dedup_bind, 1200},
-    {"test_fmt_thr_kb_fractional", test_fmt_thr_kb_fractional, 1300},
-    {"test_fmt_thr_kb_integer", test_fmt_thr_kb_integer, 1301},
-    {"test_fmt_thr_bytes", test_fmt_thr_bytes, 1302},
-    {"test_fmt_thr_mb_fractional", test_fmt_thr_mb_fractional, 1303},
-    {"test_fmt_thr_zero", test_fmt_thr_zero, 1304},
-    {"test_fmt_thr_kb_max", test_fmt_thr_kb_max, 1305},
-    {"test_fmt_thr_mb_integer", test_fmt_thr_mb_integer, 1306},
+    {"test_sto_fmt_thr_kb_fractional", test_sto_fmt_thr_kb_fractional, 1300},
+    {"test_sto_fmt_thr_kb_integer", test_sto_fmt_thr_kb_integer, 1301},
+    {"test_sto_fmt_thr_bytes", test_sto_fmt_thr_bytes, 1302},
+    {"test_sto_fmt_thr_mb_fractional", test_sto_fmt_thr_mb_fractional, 1303},
+    {"test_sto_fmt_thr_zero", test_sto_fmt_thr_zero, 1304},
+    {"test_sto_fmt_thr_kb_max", test_sto_fmt_thr_kb_max, 1305},
+    {"test_sto_fmt_thr_mb_integer", test_sto_fmt_thr_mb_integer, 1306},
     {"test_sto_line_bounds", test_sto_line_bounds, 1307},
+    {"test_mount_fmt_icon", test_mount_fmt_icon, 1310},
     {"test_parse_body_normal", test_parse_body_normal, 1307},
     {"test_parse_body_ipv6", test_parse_body_ipv6, 1400},
     {"test_parse_body_no_header", test_parse_body_no_header, 1500},
@@ -2362,6 +2492,11 @@ int main(void)
     {"test_weather_dns_start_call", test_weather_dns_start_call, 3555},
     {"test_once_3s_deadline", test_once_3s_deadline, 3560},
     {"test_once_3s_ok", test_once_3s_ok, 3570},
+    {"test_vfs_skip_init", test_vfs_skip_init, 3580},
+    {"test_vfs_skip_free", test_vfs_skip_free, 3590},
+    {"test_cpu_temp_empty_path_no_open", test_cpu_temp_empty_path_no_open, 3600},
+    {"test_nlk_init_socket_cloexec", test_nlk_init_socket_cloexec, 3610},
+    {"test_mon_destroy_closes_fd_zero", test_mon_destroy_closes_fd_zero, 3620},
   };
   for (size_t i = 0; i < sizeof run / sizeof *run; i++) {
     printf("%s\n", run[i].name);

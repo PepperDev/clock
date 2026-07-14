@@ -201,7 +201,7 @@ int rtnl_monitor_start(struct rtnl_mon_ctx *m)
 
 static void mon_destroy_ctx(struct rtnl_mon_ctx *m)
 {
-  if (m->fd > 0)
+  if (m->fd >= 0)
     sys_close(m->fd);
   m->fd = -1;
   pthread_mutex_destroy(&m->fifo.lock);

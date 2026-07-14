@@ -39,8 +39,10 @@
 #define IP6_SZ 48
 #define WTHR_TEMP_SZ 5
 #define WTHR_CODE_SZ 6
-#define GOVERNOR_SZ 16
+#define GOVERNOR_SZ 20
 #define NAME_SZ 32
+
+int is_virtual_kind(const char *kind);
 
 struct fentry {
   char name[CUP_BUF_SZ];
@@ -135,12 +137,15 @@ char *slurp(const char *path);
 struct clock_state;
 struct cpu_keep;
 int cpu_info_pct(struct clock_state *ci);
-int cpu_temp_c(struct cpu_keep *keep);
+int cpu_temp_c(const struct cpu_keep *keep);
 void get_cpu_freqs(struct clock_state *ci);
 void get_cpu_extra(struct clock_state *ci);
+void cpu_discover(struct cpu_keep *k);
 void mem_usage(struct clock_state *ci);
 void get_container_mem(struct clock_state *ci);
+void mem_discover(struct cpu_keep *k);
 void get_battery(struct clock_state *ci);
+void bat_discover(struct cpu_keep *k);
 void bat_estimate(struct clock_state *ci, int cur_raw, int state, time_t now);
 void get_uptime(struct clock_state *ci);
 
@@ -165,10 +170,11 @@ void init_req(struct nlmsghdr *nh, struct genlmsghdr *gh, struct netlink_ctx *nl
 int nl_dump_iter(struct netlink_ctx *nlk, int cmd, nl_dump_cb cb, void *arg);
 
 int nlk_init(struct netlink_ctx *nlk);
-int nlk_wlan_ssid(struct netlink_ctx *nlk, const char *iface, char *ssid, size_t sz);
 struct wlan_cache;
 int nlk_find_wlan_all(struct netlink_ctx *nlk, struct wlan_cache *cache);
-int nlk_station_rate(struct netlink_ctx *nlk, const char *iface, int *rx_mbps, int *tx_mbps, int *dbm);
+struct net_ctx;
+int nlk_station_rate(struct netlink_ctx *nlk, const char *iface, struct net_ctx *net);
+int nlk_scan_bss(struct netlink_ctx *nlk, const char *iface, struct net_ctx *net);
 
 struct link_entry {
   int ifindex;
@@ -344,7 +350,9 @@ void poll_async_fetches(struct clock_state *ci, time_t now);
 void once_wait(struct clock_state *ci, unsigned long long t0);
 void get_gpu_info(struct clock_state *ci);
 void gpu_collect(struct clock_state *ci);
+void gpu_probe(struct gpu_ctx *g);
 void get_fan_info(struct clock_state *ci);
+void fan_discover(struct cpu_keep *k);
 const char *weather_emoji(int code);
 
 #define MAX_NET 3
@@ -377,5 +385,6 @@ struct net_ctx {
   int dgram_fd;
   struct wlan_cache wcache;
   int wcache_stale;
+  unsigned char bss_mac[6];
 };
 #endif

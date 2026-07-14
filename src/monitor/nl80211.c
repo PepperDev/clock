@@ -121,17 +121,6 @@ static int copy_nla_str(const struct nlattr *a, char *buf, size_t sz)
   return 0;
 }
 
-static const struct nlmsghdr *do_nl80211(struct netlink_ctx *nlk, unsigned char *buf, int ifindex, int cmd)
-{
-  struct nlmsghdr *nh = (struct nlmsghdr *)buf;
-  nh->nlmsg_len = sizeof(struct nlmsghdr) + GENL_HDRLEN + NLA_HDRLEN + sizeof(int);
-  init_req(nh, NLMSG_DATA(nh), nlk, nlk->family, cmd);
-  pu32((unsigned char *)NLMSG_DATA(nh) + GENL_HDRLEN, NL80211_ATTR_IFINDEX, &ifindex);
-  if (talk(nlk, buf) < 0)
-    return NULL;
-  return nh;
-}
-
 static void set_rate(const struct nlattr *si, int type, int *out, int *ok)
 {
   const struct nlattr *a = nested(si, type);
@@ -144,22 +133,28 @@ static void set_rate(const struct nlattr *si, int type, int *out, int *ok)
   }
 }
 
-static int send_station_req(struct netlink_ctx *nlk, void *b, int idx)
+static void pmac(unsigned char *p, unsigned short t, const unsigned char *v)
 {
-  struct nlmsghdr *nh = (struct nlmsghdr *)b;
-  nh->nlmsg_len = sizeof(struct nlmsghdr) + GENL_HDRLEN + NLA_HDRLEN + sizeof(int);
-  init_req(nh, NLMSG_DATA(nh), nlk, nlk->family, NL80211_CMD_GET_STATION);
-  nh->nlmsg_flags |= NLM_F_DUMP;
-  pu32((unsigned char *)NLMSG_DATA(nh) + GENL_HDRLEN, NL80211_ATTR_IFINDEX, &idx);
-  return talk_dump(nlk, b);
+  struct nlattr *a = (struct nlattr *)p;
+  a->nla_type = t;
+  a->nla_len = NLA_HDRLEN + 6;
+  memcpy((char *)a + NLA_HDRLEN, v, 6);
 }
 
-static int query_station(struct netlink_ctx *nlk, int idx, int *rx, int *tx, int *dbm)
+static int send_station_targeted(struct netlink_ctx *nlk, void *b, int idx, const unsigned char *mac)
 {
-  unsigned char b[NLBUF] = { 0 };
-  if (send_station_req(nlk, b, idx) < 0)
-    return -1;
-  const struct nlattr *si = walk((struct nlmsghdr *)b, NL80211_ATTR_STA_INFO);
+  struct nlmsghdr *nh = (struct nlmsghdr *)b;
+  unsigned char *p = (unsigned char *)NLMSG_DATA(nh) + GENL_HDRLEN;
+  nh->nlmsg_len = sizeof(struct nlmsghdr) + GENL_HDRLEN + NLA_HDRLEN + (int)sizeof(int) + NLA_ALIGN(NLA_HDRLEN + 6);
+  init_req(nh, NLMSG_DATA(nh), nlk, nlk->family, NL80211_CMD_GET_STATION);
+  pu32(p, NL80211_ATTR_IFINDEX, &idx);
+  pmac(p + NLA_ALIGN(NLA_HDRLEN + sizeof(int)), NL80211_ATTR_MAC, mac);
+  return talk(nlk, b);
+}
+
+static int parse_station_info(const struct nlmsghdr *nh, int *rx, int *tx, int *dbm)
+{
+  const struct nlattr *si = walk(nh, NL80211_ATTR_STA_INFO);
   if (!si)
     return -1;
   int ok = 0;
@@ -173,28 +168,74 @@ static int query_station(struct netlink_ctx *nlk, int idx, int *rx, int *tx, int
   return ok ? 0 : -1;
 }
 
-int nlk_wlan_ssid(struct netlink_ctx *nlk, const char *iface, char *ssid, size_t sz)
+int nlk_station_rate(struct netlink_ctx *nlk, const char *iface, struct net_ctx *net)
 {
   int idx;
   if (ensure_resolved(nlk) < 0 || iface_to_idx(nlk, iface, &idx) < 0)
     return -1;
-  unsigned char b[NLBUF] = { 0 };
-  const struct nlmsghdr *nh = do_nl80211(nlk, b, idx, NL80211_CMD_GET_INTERFACE);
-  if (!nh)
+  if (!net->bss_mac[0])
     return -1;
-  return copy_nla_str(walk(nh, NL80211_ATTR_SSID), ssid, sz);
+  unsigned char b[NLBUF] = { 0 };
+  if (send_station_targeted(nlk, b, idx, net->bss_mac) < 0)
+    return -1;
+  return parse_station_info((struct nlmsghdr *)b, &net->wlan_rx_rate, &net->wlan_tx_rate, &net->wlan_dbm);
 }
 
-int nlk_station_rate(struct netlink_ctx *nlk, const char *iface, int *rx_mbps, int *tx_mbps, int *dbm)
+/* ── GET_SCAN: extract BSS MAC + SSID from scan cache ── */
+
+static int find_ssid_ie(const unsigned char *data, size_t len, char *ssid, size_t ssid_sz)
+{
+  size_t p = 0;
+  while (p + 2 <= len) {
+    unsigned char tag = data[p];
+    unsigned char tlen = data[p + 1];
+    if (p + 2 + tlen > len)
+      return -1;
+    if (tag == 0 && tlen > 0 && tlen < (int)ssid_sz) {
+      memcpy(ssid, data + p + 2, tlen);
+      ssid[tlen] = 0;
+      return 0;
+    }
+    p += 2 + tlen;
+  }
+  return -1;
+}
+
+static int parse_scan_bss(const struct nlmsghdr *nh, unsigned char *bss_mac, char *ssid, size_t ssid_sz)
+{
+  const struct nlattr *bss = walk(nh, NL80211_ATTR_BSS);
+  if (!bss)
+    return -1;
+  const struct nlattr *bid = nested(bss, NL80211_BSS_BSSID);
+  if (!bid || bid->nla_len < NLA_HDRLEN + 6)
+    return -1;
+  memcpy(bss_mac, (char *)bid + NLA_HDRLEN, 6);
+  const struct nlattr *ie = nested(bss, NL80211_BSS_INFORMATION_ELEMENTS);
+  if (ie)
+    find_ssid_ie((const unsigned char *)ie + NLA_HDRLEN, ie->nla_len - NLA_HDRLEN, ssid, ssid_sz);
+  return 0;
+}
+
+static struct nlmsghdr *init_dump(struct netlink_ctx *nlk, void *buf, int cmd, int idx)
+{
+  struct nlmsghdr *nh = (struct nlmsghdr *)buf;
+  unsigned char *p = (unsigned char *)NLMSG_DATA(nh) + GENL_HDRLEN;
+  nh->nlmsg_len = sizeof(struct nlmsghdr) + GENL_HDRLEN + NLA_HDRLEN + sizeof(int);
+  init_req(nh, NLMSG_DATA(nh), nlk, nlk->family, cmd);
+  nh->nlmsg_flags |= NLM_F_DUMP;
+  pu32(p, NL80211_ATTR_IFINDEX, &idx);
+  return nh;
+}
+
+int nlk_scan_bss(struct netlink_ctx *nlk, const char *iface, struct net_ctx *net)
 {
   int idx;
   if (ensure_resolved(nlk) < 0 || iface_to_idx(nlk, iface, &idx) < 0)
     return -1;
   unsigned char b[NLBUF] = { 0 };
-  const struct nlmsghdr *nh = do_nl80211(nlk, b, idx, NL80211_CMD_GET_STATION);
-  if (!nh)
+  if (talk_dump(nlk, init_dump(nlk, b, NL80211_CMD_GET_SCAN, idx)) < 0)
     return -1;
-  return query_station(nlk, idx, rx_mbps, tx_mbps, dbm);
+  return parse_scan_bss((struct nlmsghdr *)b, net->bss_mac, net->wlan_ssid, sizeof net->wlan_ssid);
 }
 
 /* ── WLAN station-mode interface dump ── */

@@ -101,7 +101,7 @@ static int fmt_cpu(char *b, int z, const struct clock_state *c, const char *pfx)
 {
   int lpct = (int)(c->load / c->num_cpus * PERCENT_BASE);
   const char *l = !c->keep.text ? "\xf0\x9f\x92\xbb " : "CPU ";
-  char freq[CUP_BUF_SZ], tmp[16] = "";
+  char freq[CUP_BUF_SZ] = "", tmp[16] = "";
   fmt_freq(freq, sizeof freq, c->freq, c->freq_max);
   if (c->temp > 0)
     snprintf(tmp, sizeof tmp, " %d\xc2\xb0" "C", c->temp);

@@ -444,6 +444,45 @@ static int test_net_line_null_term(void)
   return 0;
 }
 
+/* Ascii/sixel mode: wired NIC line starts with 🌐 icon */
+static int test_net_icon_wired_ascii(void)
+{
+  mock_reset();
+  setup_netlink_mocks(500000, 1000000);
+  mock_set_link_speed("eth5", 999);
+
+  struct clock_state ci;
+  memset(&ci, 0, sizeof ci);
+  ci.keep.net.wlan_dbm = -42;
+  widget_setup(&ci.keep.widget, 0, NULL);
+  get_net_info(&ci);
+
+  /* \xf0\x9f\x8c\x90 = 🌐 */
+  if (strncmp(ci.net_line, "\xf0\x9f\x8c\x90 ", 5) != 0)
+    return 1;
+  return 0;
+}
+
+/* Text mode: wired NIC line starts with iface name, no icon */
+static int test_net_icon_wired_text(void)
+{
+  mock_reset();
+  setup_netlink_mocks(500000, 1000000);
+  mock_set_link_speed("eth5", 999);
+
+  struct clock_state ci;
+  memset(&ci, 0, sizeof ci);
+  ci.keep.net.wlan_dbm = -42;
+  ci.keep.text = 1;
+  widget_setup(&ci.keep.widget, 0, NULL);
+  get_net_info(&ci);
+
+  /* Text mode: line should start with iface name "eth5" */
+  if (strncmp(ci.net_line, "eth5", 4) != 0)
+    return 1;
+  return 0;
+}
+
 int main(void)
 {
   int rc;
@@ -511,6 +550,12 @@ int main(void)
   if (rc)
     return rc;
   rc = test_net_line_null_term();
+  if (rc)
+    return rc;
+  rc = test_net_icon_wired_ascii();
+  if (rc)
+    return rc;
+  rc = test_net_icon_wired_text();
   if (rc)
     return rc;
   return 0;

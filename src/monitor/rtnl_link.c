@@ -25,25 +25,13 @@ static void link_get_stats(const struct rtattr *rta, unsigned long long *rx, uns
   *tx = s.tx_bytes;
 }
 
-static int is_virtual_kind(struct rtattr *rta)
-{
-  static const char *VTYPES[] = {
-    "tun", "tap", "veth", "bridge", "bond", "dummy",
-    "sit", "gre", "gretap", "vti", "vlan", "vxlan", "geneve"
-  };
-  for (size_t k = 0; k < sizeof VTYPES / sizeof VTYPES[0]; k++)
-    if (strcmp((const char *)RTA_DATA(rta), VTYPES[k]) == 0)
-      return 1;
-  return 0;
-}
-
 static void parse_linkinfo(struct rtattr *rta, struct link_entry *e)
 {
   size_t laspace = RTA_PAYLOAD(rta);
   for (struct rtattr * la = (struct rtattr *)RTA_DATA(rta); RTA_OK(la, laspace); la = RTA_NEXT(la, laspace)) {
     if (la->rta_type != IFLA_INFO_KIND)
       continue;
-    if (is_virtual_kind(la))
+    if (is_virtual_kind((const char *)RTA_DATA(la)))
       e->is_virtual = 1;
   }
 }

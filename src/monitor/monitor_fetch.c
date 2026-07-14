@@ -47,16 +47,23 @@ void close_conn_fd(int *fd)
     sys_close(old);
 }
 
+static void copy_truncate(char *dst, size_t dst_sz, const char *src)
+{
+  size_t n = strlen(src);
+  if (n >= dst_sz)
+    n = dst_sz - 1;
+  memcpy(dst, src, n);
+  dst[n] = 0;
+}
+
 static void pump_wan_ok(struct http_result *hr, struct cpu_keep *k, int v6)
 {
   if (v6) {
-    strncpy(k->pub_ip6, hr->data, sizeof k->pub_ip6 - 1);
-    k->pub_ip6[sizeof k->pub_ip6 - 1] = 0;
+    copy_truncate(k->pub_ip6, sizeof k->pub_ip6, hr->data);
     fetch_ok_reset(&k->wan6);
     k->wan6_state = WAN_IDLE;
   } else {
-    strncpy(k->pub_ip4, hr->data, sizeof k->pub_ip4 - 1);
-    k->pub_ip4[sizeof k->pub_ip4 - 1] = 0;
+    copy_truncate(k->pub_ip4, sizeof k->pub_ip4, hr->data);
     fetch_ok_reset(&k->wan4);
     k->wan4_state = WAN_IDLE;
   }

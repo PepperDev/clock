@@ -73,15 +73,31 @@ static int any_data_widget(const struct widget_ctx *w)
   return w->active_mask & m;
 }
 
+static void discover_keep(struct cpu_keep *k)
+{
+  if (widget_active(&k->widget, WIDGET_CPU))
+    cpu_discover(k);
+  if (widget_active(&k->widget, WIDGET_BAT))
+    bat_discover(k);
+  if (widget_active(&k->widget, WIDGET_FAN))
+    fan_discover(k);
+  if (widget_active(&k->widget, WIDGET_MEM))
+    mem_discover(k);
+}
+
+void discover_hardware(struct clock_state *ci)
+{
+  if (!any_data_widget(&ci->keep.widget))
+    return;
+  discover_keep(&ci->keep);
+  if (widget_active(&ci->keep.widget, WIDGET_GPU))
+    gpu_probe(&ci->keep.gpu);
+}
+
 void gather_all(struct clock_state *ci, time_t now)
 {
   if (!any_data_widget(&ci->keep.widget))
     return;
-  unsigned m = ci->keep.widget.active_mask;
-  if (m != ci->keep.active_mask) {
-    memset(ci, 0, offsetof(struct clock_state, keep));
-    ci->keep.active_mask = m;
-  }
   ci->num_cpus = 1;
   if (has_time_consumer(&ci->keep.widget))
     ci->keep.realtime_ts.tv_sec = now;

@@ -12,34 +12,11 @@
 #define BAT_NO_ENERGY_NOW (1u << 2)
 #define BAT_NO_FULL       (1u << 3)
 
-static int find_battery_prefix(struct clock_state *ci)
-{
-  glob_t g;
-  if (sys_glob("/sys/class/power_supply/*/type", 0, NULL, &g) != 0)
-    return 1;
-  for (size_t i = 0; i < g.gl_pathc; i++) {
-    const char *pv = g.gl_pathv[i];
-    char t[RATE_SZ];
-    if (read_file(pv, t, sizeof t) || strncmp(t, "Battery", 7))
-      continue;
-    size_t l = strlen(pv) - 5;
-    memcpy(ci->keep.bat_prefix, pv, l);
-    ci->keep.bat_prefix[l] = 0;
-    break;
-  }
-  sys_globfree(&g);
-  return !ci->keep.bat_prefix[0];
-}
-
 static const char *battery_prefix(struct clock_state *ci)
 {
   if (ci->keep.bat_flags & BAT_NO_BATTERY)
     return NULL;
-  if (!ci->keep.bat_prefix[0] && find_battery_prefix(ci)) {
-    ci->keep.bat_flags |= BAT_NO_BATTERY;
-    return NULL;
-  }
-  return ci->keep.bat_prefix;
+  return ci->keep.bat_prefix[0] ? ci->keep.bat_prefix : NULL;
 }
 
 static int bat_read_field(const char *path)
@@ -50,25 +27,19 @@ static int bat_read_field(const char *path)
   return v > (unsigned long long)INT_MAX ? INT_MAX : (int)v;
 }
 
-static int bat_read_raw(struct cpu_keep *k, const char *pre)
+static int bat_read_raw(const struct cpu_keep *k, const char *pre)
 {
   char p[PATH_BUF_SZ + 16];
-  unsigned guard = (unsigned)(-!k->bat_charge_full_raw);
   if (!(k->bat_flags & BAT_NO_CHARGE_NOW)) {
     snprintf(p, sizeof p, "%s/charge_now", pre);
     int v = bat_read_field(p);
     if (v >= 0)
       return v;
-    k->bat_flags |= guard & BAT_NO_CHARGE_NOW;
   }
   if (k->bat_flags & BAT_NO_ENERGY_NOW)
     return -1;
   snprintf(p, sizeof p, "%s/energy_now", pre);
-  int v = bat_read_field(p);
-  if (v >= 0)
-    return v;
-  k->bat_flags |= guard & BAT_NO_ENERGY_NOW;
-  return -1;
+  return bat_read_field(p);
 }
 
 static int bat_read_full(const char *pre)
@@ -93,13 +64,78 @@ static int bat_status(const char *pre)
   return (b[0] == 'C') + (b[0] == 'F' || b[0] == 'N') * 2;
 }
 
-static int bat_ensure_full(struct cpu_keep *k, const char *pre)
+static void bat_update_full(struct cpu_keep *k)
+{
+  int full = bat_read_full(k->bat_prefix);
+  if (full >= 0)
+    k->bat_charge_full_raw = full;
+}
+
+static int find_battery_prefix(struct cpu_keep *k)
+{
+  glob_t g;
+  if (sys_glob("/sys/class/power_supply/*/type", 0, NULL, &g) != 0)
+    return 1;
+  for (size_t i = 0; i < g.gl_pathc; i++) {
+    const char *pv = g.gl_pathv[i];
+    char t[RATE_SZ];
+    if (read_file(pv, t, sizeof t) || strncmp(t, "Battery", 7))
+      continue;
+    size_t l = strlen(pv) - 5;
+    memcpy(k->bat_prefix, pv, l);
+    k->bat_prefix[l] = 0;
+    sys_globfree(&g);
+    return 0;
+  }
+  sys_globfree(&g);
+  return 1;
+}
+
+static void bat_try_energy_full(struct cpu_keep *k)
+{
+  char p[PATH_BUF_SZ + 16];
+  snprintf(p, sizeof p, "%s/energy_full", k->bat_prefix);
+  if (sys_access(p, F_OK) != 0) {
+    k->bat_flags |= BAT_NO_FULL;
+    return;
+  }
+  int full = bat_read_field(p);
+  if (full >= 0)
+    k->bat_charge_full_raw = full;
+}
+
+static void bat_discover_full(struct cpu_keep *k)
+{
+  char p[PATH_BUF_SZ + 16];
+  snprintf(p, sizeof p, "%s/charge_now", k->bat_prefix);
+  if (sys_access(p, F_OK) != 0)
+    k->bat_flags |= BAT_NO_CHARGE_NOW;
+  snprintf(p, sizeof p, "%s/energy_now", k->bat_prefix);
+  if (sys_access(p, F_OK) != 0)
+    k->bat_flags |= BAT_NO_ENERGY_NOW;
+  snprintf(p, sizeof p, "%s/charge_full", k->bat_prefix);
+  if (sys_access(p, F_OK) == 0) {
+    bat_update_full(k);
+  } else {
+    bat_try_energy_full(k);
+  }
+}
+
+void bat_discover(struct cpu_keep *k)
+{
+  if (find_battery_prefix(k))
+    k->bat_flags |= BAT_NO_BATTERY;
+  else
+    bat_discover_full(k);
+}
+
+static int bat_ensure_full(struct cpu_keep *k)
 {
   if (k->bat_flags & BAT_NO_FULL)
     return -1;
   if (k->bat_charge_full_raw != 0)
     return 0;
-  int full = bat_read_full(pre);
+  int full = bat_read_full(k->bat_prefix);
   if (full < 0) {
     k->bat_flags |= BAT_NO_FULL;
     return -1;
@@ -108,18 +144,17 @@ static int bat_ensure_full(struct cpu_keep *k, const char *pre)
   return 0;
 }
 
-static void bat_recalibrate_full(struct clock_state *ci, const char *pre, int cur_raw, int fresh)
+static void bat_recalibrate_full(struct clock_state *ci, int cur_raw)
 {
   if (ci->keep.bat_tstate != 2 || ci->keep.bat_prev_state == 2 || ci->bat_pct == PERCENT_BASE)
     return;
-  int full = fresh ? ci->keep.bat_charge_full_raw : bat_read_full(pre);
-  if (full <= 0)
+  bat_update_full(&ci->keep);
+  if (ci->keep.bat_charge_full_raw <= 0)
     return;
-  ci->keep.bat_charge_full_raw = full;
-  ci->bat_pct = (int)((long long)cur_raw * PERCENT_BASE / full);
+  ci->bat_pct = (int)((long long)cur_raw * PERCENT_BASE / ci->keep.bat_charge_full_raw);
 }
 
-static void bat_process(struct clock_state *ci, const char *pre, int cur_raw, int fresh)
+static void bat_process(struct clock_state *ci, const char *pre, int cur_raw)
 {
   if (ci->keep.bat_charge_full_raw <= 0)
     return;
@@ -131,7 +166,7 @@ static void bat_process(struct clock_state *ci, const char *pre, int cur_raw, in
   }
   ci->bat_charging = st;
   bat_estimate(ci, cur_raw, st, ci->keep.realtime_ts.tv_sec);
-  bat_recalibrate_full(ci, pre, cur_raw, fresh);
+  bat_recalibrate_full(ci, cur_raw);
 }
 
 void get_battery(struct clock_state *ci)
@@ -145,8 +180,7 @@ void get_battery(struct clock_state *ci)
     cur_raw = ci->keep.bat_last_raw;
   if (cur_raw < 0)
     return;
-  int fresh = (ci->keep.bat_charge_full_raw == 0);
-  if (bat_ensure_full(&ci->keep, pre))
+  if (bat_ensure_full(&ci->keep))
     return;
-  bat_process(ci, pre, cur_raw, fresh);
+  bat_process(ci, pre, cur_raw);
 }

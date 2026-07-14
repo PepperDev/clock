@@ -15,8 +15,6 @@ enum { FAN_SZ = 256, FAN_RSV = 16 };
 #define FAN_PFX_LEN 3
 #define TEMP_PFX_LEN 4
 
-#define FAN_NO_MOBO (1u << 0)
-
 static const char *MOBO_GLOBS[] = {
   "/sys/bus/wmi/drivers/dell_smm_hwmon/*/hwmon/hwmon*",
   "/sys/devices/platform/asus-nb-wmi/hwmon/hwmon*",
@@ -196,20 +194,24 @@ static void fan_line_term(char *l, int n)
     l[n] = 0;
 }
 
+void fan_discover(struct cpu_keep *k)
+{
+  if (!k->mobo_hwmon[0])
+    mobo_find(k->mobo_hwmon, sizeof k->mobo_hwmon);
+  if (k->mobo_hwmon[0])
+    fan_cache_init(k, k->mobo_hwmon);
+  else
+    fan_fb_discover(k);
+}
+
 void get_fan_info(struct clock_state *ci)
 {
   char *l = ci->fan_line;
   *l = 0;
   struct cpu_keep *k = &ci->keep;
-  char *hwmon = k->mobo_hwmon;
-  if (!hwmon[0] && !(k->fan_flags & FAN_NO_MOBO)) {
-    mobo_find(hwmon, sizeof k->mobo_hwmon);
-    if (!hwmon[0])
-      k->fan_flags |= FAN_NO_MOBO;
-  }
   int n = 0;
-  if (*hwmon)
-    scan_hwmon_dir(l, &n, hwmon, k);
+  if (k->mobo_hwmon[0])
+    scan_hwmon_dir(l, &n, k->mobo_hwmon, k);
   else
     fallback_scan(l, &n, k);
   fan_line_term(l, n);

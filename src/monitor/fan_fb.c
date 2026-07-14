@@ -128,16 +128,20 @@ static void fan_fb_scan(char *l, int *np, struct cpu_keep *k)
   free(all);
 }
 
+void fan_fb_discover(struct cpu_keep *k)
+{
+  if (k->fan_fb_valid)
+    return;
+  glob_t g;
+  if (sys_glob("/sys/class/hwmon/hwmon*", 0, NULL, &g) != 0)
+    return;
+  fan_fb_rebuild(k, &g);
+  sys_globfree(&g);
+}
+
 void fallback_scan(char *l, int *np, struct cpu_keep *k)
 {
-  if (!k->fan_fb_valid) {
-    glob_t g;
-    if (sys_glob("/sys/class/hwmon/hwmon*", 0, NULL, &g) != 0)
-      return;
-    fan_fb_rebuild(k, &g);
-    sys_globfree(&g);
-    if (!k->fan_fb_valid)
-      return;
-  }
+  if (!k->fan_fb_valid)
+    return;
   fan_fb_scan(l, np, k);
 }

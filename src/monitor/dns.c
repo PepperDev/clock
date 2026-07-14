@@ -4,6 +4,7 @@
 #include <stdlib.h>             // cppcheck-suppress missingIncludeSystem
 #include <unistd.h>             // cppcheck-suppress missingIncludeSystem
 #include <stdint.h>             // cppcheck-suppress missingIncludeSystem
+#include <assert.h>             // cppcheck-suppress missingIncludeSystem
 #include <pthread.h>            // cppcheck-suppress missingIncludeSystem
 #include <sys/eventfd.h>        // cppcheck-suppress missingIncludeSystem
 #include <sys/socket.h>         // cppcheck-suppress missingIncludeSystem
@@ -79,12 +80,6 @@ static void store_result(struct dns_slot *slot, const struct sockaddr_storage *s
   pthread_mutex_unlock(&slot->lock);
 }
 
-static void exit_thread(int oldtype)
-{
-  pthread_setcanceltype(oldtype, NULL);
-  pthread_detach(pthread_self());
-}
-
 static void *dns_thread_run(void *arg)
 {
   struct dns_arg *d = arg;
@@ -103,8 +98,18 @@ static void *dns_thread_run(void *arg)
   store_result(d->slot, &ss, slen);
   ensure_io_thread(&d->ctx->ioc);
   pthread_cleanup_pop(1);
-  exit_thread(oldtype);
+  pthread_setcanceltype(oldtype, NULL);
   return NULL;
+}
+
+static void dns_finalize(struct dns_slot *slot)
+{
+  pthread_t t = slot->thread;
+  slot->state = DNS_IDLE;
+  slot->cancelled = 0;
+  pthread_mutex_unlock(&slot->lock);
+  if (t)
+    pthread_detach(t);
 }
 
 int dns_read_slot(struct dns_slot *slot, struct sockaddr_storage *ss, socklen_t salen)
@@ -115,15 +120,11 @@ int dns_read_slot(struct dns_slot *slot, struct sockaddr_storage *ss, socklen_t 
     socklen_t n = slot->addrlen < salen ? slot->addrlen : salen;
     memcpy(ss, &slot->addr, n);
     socklen_t ret = slot->addrlen;
-    slot->state = DNS_IDLE;
-    slot->cancelled = 0;
-    pthread_mutex_unlock(&slot->lock);
+    dns_finalize(slot);
     return ret;
   }
   if (s == DNS_ERROR) {
-    slot->state = DNS_IDLE;
-    slot->cancelled = 0;
-    pthread_mutex_unlock(&slot->lock);
+    dns_finalize(slot);
     return -1;
   }
   pthread_mutex_unlock(&slot->lock);
@@ -165,6 +166,7 @@ static struct dns_arg *dns_arg_new(struct async_ctx *ctx, struct dns_slot *slot,
 
 static int start_dns(struct async_ctx *ctx, struct dns_slot *slot, const char *host, int family)
 {
+  assert(slot->state == DNS_IDLE);
   struct dns_arg *arg = dns_arg_new(ctx, slot, host, family);
   if (!arg)
     return 0;

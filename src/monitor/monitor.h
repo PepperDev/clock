@@ -27,7 +27,6 @@ struct async_ctx {
 struct fentry;
 
 struct cpu_keep {
-  unsigned active_mask;
   char pub_ip4[IP4_SZ];
   char pub_ip6[IP6_SZ];
   struct net_ctx net;
@@ -85,13 +84,11 @@ struct cpu_keep {
   int bat_inited;
   unsigned int bat_flags;
   unsigned int mem_flags;
-  unsigned int cpu_flags;
   char cpu_temp_path[CPU_TEMP_PATH_SZ];
   char **cpu_freq_dirs;
   unsigned cpu_freq_ndir;
   int cpu_freq_ndir_cap;
   char mobo_hwmon[PATH_BUF_SZ];
-  unsigned int fan_flags;
   char *fan_fb_valid;
   int fan_fb_cap;
   struct fentry *fan_ents;
@@ -119,8 +116,6 @@ struct clock_state {
   int bat_charging;
   int bat_est_sec;
   int net_dbm;
-  int sto_pct;
-  int sto_temp;
   int gpu_pct;
   int gpu_temp;
   int gpu_freq;
@@ -152,6 +147,7 @@ struct clock_state {
 };
 
 void gather_all(struct clock_state *ci, time_t now);
+void discover_hardware(struct clock_state *ci);
 void async_ctx_init(struct async_ctx *ctx, int *wan4_fd, int *wan6_fd, int *weather_fd, unsigned int widget_mask);
 
 #endif

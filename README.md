@@ -7,16 +7,7 @@ No external binaries or runtime dependencies — all data is gathered from `/pro
 ## Features
 
 - Large digital clock (ASCII block art or sixel graphics)
-- **CPU** — usage, load, iowait, frequency, temperature, governor
-- **GPU** — usage, core/memory clocks, VRAM usage, temperature, fan
-- **MEM** — host + container memory usage
-- **FAN** — motherboard fan speeds and temperatures
-- **BAT** — percentage, status, time-to-full/empty estimate
-- **UP** — system uptime
-- **STO** — per-device throughput, per-mount usage, NVMe temperature
-- **NET** — per-interface throughput, link speed, wireless signal/SSID, local + public IPs
-- **WEATHER** — current conditions, temperature with min/max
-- **CAL** — month calendar grid with today highlighted
+- Machine monitoring sidebar with 11 widgets (see below)
 
 All widgets are always-on by default. Use `-w` to select a custom set.
 
@@ -72,16 +63,16 @@ Flags may be combined after a single dash: `-oS` ≡ `-o -S`.
 | Widget | Content |
 |--------|---------|
 | `DATE` | Current date |
-| `CPU` | Usage, load, frequency, temperature, governor |
-| `GPU` | Usage, clocks, VRAM, temperature, fan |
-| `MEM` | Host + container memory |
+| `CPU` | Usage, load, iowait, frequency, temperature, governor |
+| `GPU` | Usage, core/memory clocks, VRAM, temperature, fan |
+| `MEM` | Host + container memory usage |
 | `FAN` | Motherboard fan RPMs and temperatures |
-| `BAT` | Percentage, status, time estimate |
+| `BAT` | Percentage, status, time-to-full/empty estimate |
 | `UP` | Uptime |
-| `STO` | Storage throughput, mount usage, temperature |
-| `NET` | NIC throughput, link speed, wireless signal/SSID, IPs |
-| `WEATHER` | Conditions, temperature |
-| `CAL` | Month calendar |
+| `STO` | Per-device throughput, per-mount usage, NVMe temperature |
+| `NET` | Per-interface throughput, link speed, wireless signal/SSID, local + public IPs |
+| `WEATHER` | Current conditions, temperature with min/max |
+| `CAL` | Month calendar grid with today highlighted |
 
 ### Examples
 

@@ -31,7 +31,7 @@ check_net()
   cur=$((cur+1))
 
   [ $cur -le "$lines" ] || { fail "NET: missing NIC line"; return 1; }
-  echo "$o" | sed -n "${cur}p" | grep -qE '^[a-zA-Z0-9._:-]+ [↓↑][0-9.]+[KMGb]?↑[0-9.]+[KMGb]?( ▂▄▆█ -[0-9]+dBm)?$' \
+  echo "$o" | sed -n "${cur}p" | grep -qE '^[a-zA-Z0-9._:-]+ [↓↑][0-9.]+[KMGb]?↑[0-9.]+[KMGb]?( ▂▄▆?█? -[0-9]+dBm)?$' \
     || { fail "NET: line 2 not a valid NIC line"; return 1; }
   cur=$((cur+1))
 
@@ -45,28 +45,28 @@ check_net()
     nxt=$(echo "$o" | sed -n "${cur}p")
   fi
 
-  echo "$nxt" | grep -qE '^IP [0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' \
+  echo "$nxt" | grep -qE '^(IP|WIP) [0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' \
     || { fail "NET: IP IPv4 line not found"; return 1; }
   cur=$((cur+1))
 
   [ $cur -le "$lines" ] || { fail "NET: missing WAN line"; return 1; }
   nxt=$(echo "$o" | sed -n "${cur}p")
-  if echo "$nxt" | grep -q '^IP6 '; then
-    echo "$nxt" | grep -qE '^IP6 [0-9a-fA-F:]+$' \
+  if echo "$nxt" | grep -qE '^(IP6|WIP6) '; then
+    echo "$nxt" | grep -qE '^(IP6|WIP6) [0-9a-fA-F:]+$' \
       || { fail "NET: IP6 invalid format"; return 1; }
     cur=$((cur+1))
     [ $cur -le "$lines" ] || { fail "NET: missing WAN line"; return 1; }
     nxt=$(echo "$o" | sed -n "${cur}p")
   fi
 
-  echo "$nxt" | grep -qE '^WAN [0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' \
+  echo "$nxt" | grep -qE '^(WAN|WIP) [0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' \
     || { fail "NET: WAN IPv4 not found"; return 1; }
   cur=$((cur+1))
 
   if [ $cur -le "$lines" ]; then
     nxt=$(echo "$o" | sed -n "${cur}p")
-    if echo "$nxt" | grep -q '^WAN6 '; then
-      echo "$nxt" | grep -qE '^WAN6 [0-9a-fA-F:]+$' \
+    if echo "$nxt" | grep -qE '^(WAN6|WIP6) '; then
+      echo "$nxt" | grep -qE '^(WAN6|WIP6) [0-9a-fA-F:]+$' \
         || { fail "NET: WAN6 invalid format"; return 1; }
       cur=$((cur+1))
     fi
